@@ -24,7 +24,7 @@ else:
 
 # --- DEBUG LOGGING SECTION ---
 st.subheader("System Log")
-st.write("Current `csv_input` variable type:", type(csv_input))
+#st.write("Current `csv_input` variable type:", type(csv_input))
 st.write("Value of `csv_input`:", csv_input)
 
 if csv_input is not None:
