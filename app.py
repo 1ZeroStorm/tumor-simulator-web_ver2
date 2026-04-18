@@ -21,6 +21,22 @@ if data_option == "Use Default Data":
 else:
     csv_input = st.sidebar.file_uploader("Upload CSV", type="csv")
 
+# --- DEBUG LOGGING SECTION ---
+st.subheader("System Log")
+st.write("Current `csv_input` variable type:", type(csv_input))
+st.write("Value of `csv_input`:", csv_input)
+
+if csv_input is not None:
+    # Let's actually look at the data to be sure
+    df_preview = pd.read_csv(csv_input)
+    st.write("📊 Data Preview (First 5 rows):")
+    st.dataframe(df_preview.head()) 
+    
+    # IMPORTANT: Reset the "cursor" of the file if it's an upload
+    # so the Analyzer can read it again later.
+    if hasattr(csv_input, 'seek'):
+        csv_input.seek(0)
+
 # --- Simulation Logic ---
 if st.button("🚀 Start Simulation"):
     if csv_input is not None:
