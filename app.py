@@ -2,8 +2,8 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from stable_baselines3 import PPO
-from analyzer import CancerAnalyzer
-from environment import CancerEnv
+from analyzer import PatientAnalyzer
+from environment import CancerSimulation
 import matplotlib.pyplot as plt
 
 # --- CONFIGURATION ---
@@ -11,7 +11,7 @@ st.set_page_config(page_title="The Peacekeeper: AI Immunotherapy", layout="wide"
 
 def load_resources():
     # Load the analyzer (Neural Network logic)
-    analyzer = CancerAnalyzer() 
+    analyzer = PatientAnalyzer() 
     # Load the pre-trained PPO model
     model = PPO.load("ppo_cancer_policy")
     return analyzer, model
@@ -40,7 +40,7 @@ if uploaded_file is not None:
 
     if st.button("Generate Optimized Treatment Plan"):
         # Step 2: Strategy Optimization Phase
-        env = CancerEnv(profile)
+        env = CancerSimulation(profile)
         obs, _ = env.reset()
         
         history = []
