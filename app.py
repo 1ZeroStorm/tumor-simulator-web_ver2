@@ -1,0 +1,64 @@
+import streamlit as st
+import time
+import numpy as np
+import matplotlib.pyplot as plt
+from environment import CancerSimulation
+from analyzer import PatientAnalyzer
+
+st.set_page_config(page_title="AI Tumor Simulator", layout="wide")
+
+st.title("🧬 AI Cancer Treatment Simulator")
+st.write("Simulate tumor growth and AI-driven drug applications in real-time.")
+
+# --- Sidebar for Data Input ---
+st.sidebar.header("Data Source")
+data_option = st.sidebar.radio("Select Data:", ["Use Default Data", "Upload My Own CSV"])
+
+if data_option == "Use Default Data":
+    csv_path = "Gene_Expression_Analysis_and_Disease_Relationship_Synthetic.csv"
+else:
+    uploaded_file = st.sidebar.file_uploader("Upload CSV", type="csv")
+    if uploaded_file:
+        csv_path = uploaded_file # Streamlit handles the path automatically
+
+# --- Simulation Logic ---
+if st.button("🚀 Start Simulation"):
+    analyzer = PatientAnalyzer(csv_path)
+    profile = analyzer.get_strategic_profile()
+    env = CancerSimulation(profile)
+    
+    obs, _ = env.reset()
+    
+    # Placeholders for the "Lively" updates
+    col1, col2 = st.columns(2)
+    with col1:
+        status_text = st.empty()
+        chart_place = st.empty()
+    with col2:
+        log_text = st.empty()
+    
+    tumor_history = []
+    log_messages = []
+
+    for day in range(1, 61):
+        # Example Logic: Switch to Drug B if Resistance A is high
+        action = 1 if obs[1] < 12 else 2 
+        
+        obs, reward, done, _, _ = env.step(action)
+        
+        # UI Updates
+        action_name = ["Rest", "Drug A", "Drug B (TRAP)"][action]
+        tumor_history.append(obs[0])
+        
+        status_text.metric("Current Tumor Size", f"{int(obs[0])} cells", delta=f"{int(obs[0] - (tumor_history[-2] if len(tumor_history)>1 else 1000))}")
+        
+        # Update Chart
+        chart_place.line_chart(tumor_history)
+        
+        # Update Log
+        log_messages.append(f"Day {day}: Applied {action_name}")
+        log_text.text_area("Treatment Logs", "\n".join(log_messages[::-1]), height=300)
+        
+        time.sleep(0.1) # Controls the speed of the "lively" simulation
+    
+    st.success("Simulation Complete!")
