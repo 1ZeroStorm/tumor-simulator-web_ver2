@@ -5,6 +5,7 @@ from stable_baselines3 import PPO
 from analyzer import PatientAnalyzer
 from environment import CancerSimulation
 import matplotlib.pyplot as plt
+import os
 
 # --- CONFIGURATION ---
 st.set_page_config(page_title="The Peacekeeper: AI Immunotherapy", layout="wide")
@@ -12,12 +13,20 @@ st.set_page_config(page_title="The Peacekeeper: AI Immunotherapy", layout="wide"
 @st.cache_resource
 def load_resources():
     # Load the pre-trained PPO model
+    model_path = "ppo_cancer_policy"
+    
+    # Check if model file exists
+    if not os.path.exists(f"{model_path}.zip"):
+        st.error("⚠️ Model not found! Please train the model first by running: `python train.py`")
+        st.info("The model file should be saved as 'ppo_cancer_policy.zip' in the project directory.")
+        st.stop()
+    
     try:
-        model = PPO.load("ppo_cancer_policy")
+        model = PPO.load(model_path)
+        return model
     except Exception as e:
         st.error(f"Error loading PPO model: {e}")
-        model = None
-    return model
+        st.stop()
 
 st.title("🛡️ The Peacekeeper")
 st.markdown("### Digital Immunotherapy & Evolutionary Trap Optimizer")
