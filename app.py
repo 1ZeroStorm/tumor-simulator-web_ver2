@@ -259,28 +259,64 @@ if uploaded_file is not None:
         st.dataframe(df_history, use_container_width=True)
         
         # --- VISUALIZATION (The "Why") ---
-        st.subheader("Evolutionary Trap Visualization")
-        fig, ax1 = plt.subplots(figsize=(10, 5))
+        st.subheader("📈 Evolutionary Trap Analysis - Treatment Strategy Over Time")
+        fig, ax1 = plt.subplots(figsize=(12, 6), facecolor='#0E1117')
+        ax1.set_facecolor('#161B22')
 
+        # Identify Drug B application days
+        drug_b_days = df_history[df_history['Action'].str.contains('Drug B', na=False)]['Day'].tolist()
+        
+        # Plot Tumor Size on primary y-axis
         color = 'tab:red'
-        ax1.set_xlabel('Day')
-        ax1.set_ylabel('Tumor Size', color=color)
-        ax1.plot(df_history['Day'], df_history['Tumor Size'], color=color, linewidth=3, label="Tumor Size")
+        ax1.set_xlabel('Day', color='#C9D1D9', fontsize=11)
+        ax1.set_ylabel('Tumor Size', color=color, fontsize=11)
+        ax1.plot(df_history['Day'], df_history['Tumor Size'], color=color, linewidth=3, label="Tumor Size", marker='o', markersize=4)
         ax1.tick_params(axis='y', labelcolor=color)
+        ax1.tick_params(axis='x', labelcolor='#C9D1D9')
+        ax1.grid(True, alpha=0.2, color='#30363D')
+        
+        # Highlight Drug B application areas
+        if drug_b_days:
+            for drug_b_day in drug_b_days:
+                ax1.axvline(x=drug_b_day, color='#FF6B6B', linestyle='--', linewidth=2, alpha=0.6)
+            ax1.axvspan(min(drug_b_days) - 0.5, max(drug_b_days) + 0.5, alpha=0.1, color='#FF6B6B', label='Drug B (TRAP) Applied')
 
+        # Plot Resistance levels on secondary y-axis
         ax2 = ax1.twinx()
-        ax2.set_ylabel('Resistance Levels')
-        ax2.plot(df_history['Day'], df_history['Resist_A'], '--', label="Resist A (Target)")
-        ax2.plot(df_history['Day'], df_history['Resist_B'], ':', label="Resist B (Trap)", color='green')
-        ax2.axhline(y=2.5, color='gray', linestyle='-', alpha=0.3, label="Trap Threshold")
+        ax2.set_ylabel('Resistance Levels', color='#C9D1D9', fontsize=11)
+        ax2.plot(df_history['Day'], df_history['Resist_A'], '--', label="Resist A (Priming Target)", 
+                color='#1f77b4', linewidth=2, marker='s', markersize=3)
+        ax2.plot(df_history['Day'], df_history['Resist_B'], ':', label="Resist B (Trap Trigger)", 
+                color='#2ca02c', linewidth=2.5, marker='^', markersize=4)
+        
+        # Add trap threshold line
+        ax2.axhline(y=2.5, color='#FFA500', linestyle='-', linewidth=2, alpha=0.7, label="Trap Threshold (2.5)")
+        ax2.tick_params(axis='y', labelcolor='#C9D1D9')
+        ax2.set_ylim(bottom=0)
+        
+        # Combine legends from both axes
+        lines1, labels1 = ax1.get_legend_handles_labels()
+        lines2, labels2 = ax2.get_legend_handles_labels()
+        ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper left', fontsize=9, facecolor='#161B22', edgecolor='#30363D')
+        
+        ax1.set_title('Strategic Treatment Timeline: Priming → Trap Activation', 
+                     color='#C9D1D9', fontsize=12, weight='bold', pad=15)
         
         fig.tight_layout()
         st.pyplot(fig)
 
         st.markdown("""
-        **Doctor's Note:** The AI utilized Drug A to drive down the resistance to Drug B. 
-        Once 'Resist_B' crossed the threshold of 2.5, the 'Evolutionary Trap' was sprung, 
-        leading to rapid tumor mass reduction while maintaining safety margins.
+        **📋 Treatment Strategy Explanation:**
+        
+        🔵 **Phase 1 - Priming (Drug A):** The AI applies Drug A to build up collateral sensitivity. 
+        While Res_A increases, Res_B is driven down toward the trap threshold.
+        
+        🔴 **Phase 2 - Trap Activation (Drug B):** Once Res_B crosses the 2.5 threshold, 
+        the evolutionary trap is sprung! Drug B becomes highly effective (85% kill rate), 
+        rapidly reducing tumor burden while maintaining safety.
+        
+        ⚠️ **Toxicity Management:** The system monitors cumulative toxicity and switches 
+        to rest days when needed to prevent organ damage.
         """)
 
 else:
