@@ -1,7 +1,7 @@
 import pandas as pd
 from stable_baselines3 import PPO
-from environment import CancerEnv
-from analyzer import CancerAnalyzer
+from environment import CancerSimulation
+from analyzer import PatientAnalyzer
 import os
 
 def train_peacekeeper_model():
@@ -9,14 +9,14 @@ def train_peacekeeper_model():
     
     # 1. Load the dataset
     try:
-        data = pd.read_csv("Gene_Expression_Analysis_and_Disease_Relationship_Synthetic.csv")
+        data = pd.read_csv("data/Gene_Expression_Analysis_and_Disease_Relationship_Synthetic.csv")
     except FileNotFoundError:
         print("Error: CSV file not found. Please ensure the dataset is in the same folder.")
         return
 
     # 2. Extract the patient profile using your Analyzer (Neural Network logic)
-    analyzer = CancerAnalyzer()
-    profile = analyzer.get_patient_profile(data)
+    analyzer = PatientAnalyzer(df=data)
+    profile = analyzer.get_patient_profile()
     
     print(f"Targeting Patient Profile:")
     print(f" > Max Resistance A: {profile['max_res_a']:.2f}")
@@ -25,7 +25,7 @@ def train_peacekeeper_model():
 
     # 3. Initialize the Environment
     print("--- Phase 2: Training Strategy (Reinforcement Learning) ---")
-    env = CancerEnv(profile)
+    env = CancerSimulation(profile)
 
     # 4. Define the PPO Agent
     # We use MlpPolicy (Multi-layer Perceptron) because our state is simple numbers.
