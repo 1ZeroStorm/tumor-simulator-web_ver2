@@ -129,9 +129,13 @@ if uploaded_file is not None:
             action, _ = model.predict(obs, deterministic=True)
             obs, reward, terminated, truncated, info = env.step(action)
             
-            # Map action to readable name
-            action_name = "Drug A (Priming)" if action == 1 else "Drug B (TRAP)"
-            if action == 0: action_name = "Rest (Recovery)"
+            # Map action to readable name - clear conditional logic
+            if action == 0:
+                action_name = "Rest (Recovery)"
+            elif action == 1:
+                action_name = "Drug A (Priming)"
+            else:  # action == 2
+                action_name = "Drug B (TRAP)"
             
             # Get values from state
             size, res_a, res_b = obs[0], obs[1], obs[2]
