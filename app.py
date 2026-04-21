@@ -72,9 +72,22 @@ st.info("Upload patient proteomic data to generate a personalized, safety-constr
 st.sidebar.header("Patient Data Input")
 uploaded_file = st.sidebar.file_uploader("Upload Proteomic CSV", type=["csv"])
 
+# Initialize session state variables
+if 'uploaded_data' not in st.session_state:
+    st.session_state.uploaded_data = None
+if 'patient_profile' not in st.session_state:
+    st.session_state.patient_profile = None
+if 'treatment_history' not in st.session_state:
+    st.session_state.treatment_history = None
+if 'current_day_view' not in st.session_state:
+    st.session_state.current_day_view = 0
+
 if uploaded_file is not None:
-    model = load_resources()
+    # Store uploaded data in session state
     data = pd.read_csv(uploaded_file)
+    st.session_state.uploaded_data = data
+    
+    model = load_resources()
     
     try:
         analyzer = PatientAnalyzer(df=data)
@@ -85,6 +98,7 @@ if uploaded_file is not None:
     # Step 1: Diagnostic Phase (Neural Network)
     with st.spinner("Analyzing Proteomic Signatures..."):
         profile = analyzer.get_patient_profile(data)
+        st.session_state.patient_profile = profile
     
     # --- DISPLAY DIAGNOSTIC SUMMARY ---
     col1, col2, col3 = st.columns(3)
@@ -112,7 +126,7 @@ if uploaded_file is not None:
             
             # Get values from state
             size, res_a, res_b = obs[0], obs[1], obs[2]
-            toxicity = info.get('toxicity', day) # Adjust based on your env.py variables
+            toxicity = info.get('toxicity', day)
             
             # Safety Status Logic
             if toxicity < 5: status = "🟢 SAFE"
@@ -131,17 +145,22 @@ if uploaded_file is not None:
             if size <= 0:
                 break
             day += 1
-
+        
+        # Store history in session state
+        st.session_state.treatment_history = history
+        st.session_state.current_day_view = 0
+    
+    # Display results if history exists
+    if st.session_state.treatment_history is not None:
+        history = st.session_state.treatment_history
+        profile = st.session_state.patient_profile
+        
         # --- RESULTS DISPLAY ---
-        st.success(f"Strategy Optimized: Treatment targets eradication by Day {day}")
+        st.success(f"Strategy Optimized: Treatment targets eradication by Day {len(history)}")
         
         # === INTERACTIVE TUMOR VISUALIZATION ===
         st.markdown("---")
         st.subheader("🔬 Microscopic Tumor Evolution")
-        
-        # Create session state for day navigation
-        if 'current_day_view' not in st.session_state:
-            st.session_state.current_day_view = 0
         
         # Day Navigation Controls
         nav_col1, nav_col2, nav_col3, nav_col4, nav_col5 = st.columns([1, 1, 3, 1, 1])
