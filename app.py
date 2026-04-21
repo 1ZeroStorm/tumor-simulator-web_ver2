@@ -81,8 +81,17 @@ if 'treatment_history' not in st.session_state:
     st.session_state.treatment_history = None
 if 'current_day_view' not in st.session_state:
     st.session_state.current_day_view = 0
+if 'current_file_name' not in st.session_state:
+    st.session_state.current_file_name = None
 
 if uploaded_file is not None:
+    # Check if a new file was uploaded (different from the current one)
+    if uploaded_file.name != st.session_state.current_file_name:
+        # Reset treatment results when a new file is uploaded
+        st.session_state.treatment_history = None
+        st.session_state.current_day_view = 0
+        st.session_state.current_file_name = uploaded_file.name
+    
     # Store uploaded data in session state
     data = pd.read_csv(uploaded_file)
     st.session_state.uploaded_data = data
