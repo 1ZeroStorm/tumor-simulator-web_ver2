@@ -9,12 +9,15 @@ import matplotlib.pyplot as plt
 # --- CONFIGURATION ---
 st.set_page_config(page_title="The Peacekeeper: AI Immunotherapy", layout="wide")
 
+@st.cache_resource
 def load_resources():
-    # Load the analyzer (Neural Network logic)
-    analyzer = PatientAnalyzer() 
     # Load the pre-trained PPO model
-    model = PPO.load("ppo_cancer_policy")
-    return analyzer, model
+    try:
+        model = PPO.load("ppo_cancer_policy")
+    except Exception as e:
+        st.error(f"Error loading PPO model: {e}")
+        model = None
+    return model
 
 st.title("🛡️ The Peacekeeper")
 st.markdown("### Digital Immunotherapy & Evolutionary Trap Optimizer")
@@ -25,8 +28,14 @@ st.sidebar.header("Patient Data Input")
 uploaded_file = st.sidebar.file_uploader("Upload Proteomic CSV", type=["csv"])
 
 if uploaded_file is not None:
-    analyzer, model = load_resources()
+    model = load_resources()
     data = pd.read_csv(uploaded_file)
+    
+    try:
+        analyzer = PatientAnalyzer(df=data)
+    except Exception as e:
+        st.error(f"Error initializing analyzer: {e}")
+        st.stop()
     
     # Step 1: Diagnostic Phase (Neural Network)
     with st.spinner("Analyzing Proteomic Signatures..."):
