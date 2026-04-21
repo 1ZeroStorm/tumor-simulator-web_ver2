@@ -5,7 +5,43 @@ from stable_baselines3 import PPO
 from analyzer import PatientAnalyzer
 from environment import CancerSimulation
 import matplotlib.pyplot as plt
+import matplotlib.patches as patches
 import os
+
+# --- HELPER FUNCTION: TUMOR VISUALIZATION ---
+def create_tumor_visualization(tumor_size, title=""):
+    """Create a dark-mode tumor visualization with microscopic nodes"""
+    fig, ax = plt.subplots(figsize=(8, 6), facecolor='#0E1117')
+    ax.set_facecolor('#161B22')
+    
+    # Calculate number of tumor nodes based on size
+    # Scale: higher tumor size = more dots
+    num_tumors = max(10, int(tumor_size / 100))
+    num_tumors = min(200, num_tumors)  # Cap at 200 for visibility
+    
+    # Generate random positions for tumor nodes
+    np.random.seed(hash(title) % 2**32)  # Consistent positioning
+    x_positions = np.random.uniform(0.1, 0.9, num_tumors)
+    y_positions = np.random.uniform(0.1, 0.9, num_tumors)
+    
+    # Vary dot sizes for more realistic tumor appearance
+    sizes = np.random.uniform(20, 150, num_tumors)
+    
+    # Create gradient effect with different colors
+    scatter = ax.scatter(x_positions, y_positions, s=sizes, 
+                        c=np.random.uniform(0.3, 1, num_tumors), 
+                        cmap='Reds', alpha=0.7, edgecolors='#FF6B6B', linewidth=0.5)
+    
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.axis('off')
+    
+    # Add title with tumor count
+    fig.text(0.5, 0.95, title, ha='center', fontsize=14, color='#C9D1D9', weight='bold')
+    fig.text(0.5, 0.02, f"Estimated Tumor Cells: {num_tumors * 100}", 
+            ha='center', fontsize=10, color='#8B949E', style='italic')
+    
+    return fig
 
 # --- CONFIGURATION ---
 st.set_page_config(page_title="The Peacekeeper: AI Immunotherapy", layout="wide")
@@ -99,9 +135,100 @@ if uploaded_file is not None:
         # --- RESULTS DISPLAY ---
         st.success(f"Strategy Optimized: Treatment targets eradication by Day {day}")
         
+        # === INTERACTIVE TUMOR VISUALIZATION ===
+        st.markdown("---")
+        st.subheader("🔬 Microscopic Tumor Evolution")
+        
+        # Create session state for day navigation
+        if 'current_day_view' not in st.session_state:
+            st.session_state.current_day_view = 0
+        
+        # Day Navigation Controls
+        nav_col1, nav_col2, nav_col3, nav_col4, nav_col5 = st.columns([1, 1, 3, 1, 1])
+        
+        with nav_col1:
+            if st.button("◀ PREV", key="prev_day"):
+                if st.session_state.current_day_view > 0:
+                    st.session_state.current_day_view -= 1
+        
+        with nav_col3:
+            st.markdown(f"<div style='text-align: center; padding: 10px;'><h3>📅 Day {st.session_state.current_day_view + 1}</h3></div>", 
+                       unsafe_allow_html=True)
+        
+        with nav_col5:
+            if st.button("NEXT ▶", key="next_day"):
+                if st.session_state.current_day_view < len(history) - 1:
+                    st.session_state.current_day_view += 1
+        
+        # Before/After Toggle
+        toggle_col1, toggle_col2 = st.columns([1, 1])
+        with toggle_col1:
+            show_before = st.toggle("🔴 Before Drug Application", value=True, key="before_toggle")
+        with toggle_col2:
+            show_after = st.toggle("🟢 After Drug Application", value=True, key="after_toggle")
+        
+        # Get current day data
+        current_idx = st.session_state.current_day_view
+        current_day_data = history[current_idx]
+        
+        # Display tumor visualizations
+        if show_before and show_after:
+            vis_col1, vis_col2 = st.columns(2)
+            
+            # Estimate tumor size before drug (slightly larger)
+            tumor_before = current_day_data["Tumor Size"] * 1.15
+            
+            with vis_col1:
+                st.markdown("<h4 style='text-align: center;'>🔴 Before Treatment</h4>", unsafe_allow_html=True)
+                fig_before = create_tumor_visualization(tumor_before, 
+                    f"Day {current_day_data['Day']} - Before {current_day_data['Action']}")
+                st.pyplot(fig_before)
+                plt.close(fig_before)
+            
+            with vis_col2:
+                st.markdown("<h4 style='text-align: center;'>🟢 After Treatment</h4>", unsafe_allow_html=True)
+                fig_after = create_tumor_visualization(current_day_data["Tumor Size"], 
+                    f"Day {current_day_data['Day']} - After {current_day_data['Action']}")
+                st.pyplot(fig_after)
+                plt.close(fig_after)
+        
+        elif show_before:
+            st.markdown("<h4 style='text-align: center;'>🔴 Before Treatment</h4>", unsafe_allow_html=True)
+            tumor_before = current_day_data["Tumor Size"] * 1.15
+            fig_before = create_tumor_visualization(tumor_before, 
+                f"Day {current_day_data['Day']} - Before {current_day_data['Action']}")
+            st.pyplot(fig_before)
+            plt.close(fig_before)
+        
+        elif show_after:
+            st.markdown("<h4 style='text-align: center;'>🟢 After Treatment</h4>", unsafe_allow_html=True)
+            fig_after = create_tumor_visualization(current_day_data["Tumor Size"], 
+                f"Day {current_day_data['Day']} - After {current_day_data['Action']}")
+            st.pyplot(fig_after)
+            plt.close(fig_after)
+        
+        # Display current day details
+        st.markdown("---")
+        detail_col1, detail_col2, detail_col3, detail_col4 = st.columns(4)
+        
+        with detail_col1:
+            st.metric("Action Taken", current_day_data["Action"], 
+                     delta=None, delta_color="off")
+        with detail_col2:
+            st.metric("Tumor Size", f"{current_day_data['Tumor Size']}", 
+                     delta=None, delta_color="off")
+        with detail_col3:
+            st.metric("Drug A Resistance", f"{current_day_data['Resist_A']:.2f}", 
+                     delta=None, delta_color="off")
+        with detail_col4:
+            st.metric("Drug B Resistance", f"{current_day_data['Resist_B']:.2f}", 
+                     delta=None, delta_color="off")
+        
         # Display Table
+        st.markdown("---")
+        st.subheader("📊 Full Treatment Timeline")
         df_history = pd.DataFrame(history)
-        st.table(df_history)
+        st.dataframe(df_history, use_container_width=True)
         
         # --- VISUALIZATION (The "Why") ---
         st.subheader("Evolutionary Trap Visualization")
