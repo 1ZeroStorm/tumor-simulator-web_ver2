@@ -33,68 +33,61 @@ class CancerSimulation(gym.Env):
         return self.state, {}
 
     def step(self, action):
-        size, res_a, res_b, toxicity = self.state
-        # size = 1000      
-        # res_a = currently the average resistance of all tumor
-        # res_b = initialized 5.0
-        # toxicity = current toxicity level
+        size_before, res_a, res_b, toxicity_before = self.state
         self.day += 1
-        # initialize from self.reset() and adding first day
-
-        size *= (1.0 + self.profile['avg_growth'] / 100.0)
-        # average growth size increment
         
-        reward = 0
+        # 1. Natural Tumor Growth
+        size = size_before * (1.0 + self.profile['avg_growth'] / 100.0)
         
-        # Toxicology: Update consecutive drugs and toxicity
-        if action == 1 or action == 2:  # Drug use
+        # 2. Toxicity Logic (Keep your existing constraints)
+        if action == 1 or action == 2:
             self.consecutive_drugs += 1
-            self.toxicity += 1.0  # Increase toxicity
-            if self.consecutive_drugs >= 5:
-                reward -= 1000  # Massive penalty for 5+ consecutive drug days
-        else:  # Rest
+            self.toxicity += 1.0
+        else:
             self.consecutive_drugs = 0
-            self.toxicity = max(0.0, self.toxicity - 0.5)  # Recover toxicity
-        
+            self.toxicity = max(0.0, self.toxicity - 0.5)
+
+        # 3. Drug Effects
         if action == 1: # Drug A (Standard)
             kill_rate = max(0.05, 0.9 - (res_a / self.profile['max_res_a']))
-            # The 0.9 represents a drug that is 90% effective under perfect conditions (when the cancer has zero resistance).
-            # The 0.05 represents the 5% minimum kill rate. This is the "Floor."
-                #Why is it there? Without this, if the cancer's resistance (res_a) became equal to the max_res_a, the math would result in 0% kill rate.
-            
-            size -= (size * kill_rate) # reducing size
-
-            res_a += 0.3 # Mutation
-            res_b -= 0.4 # Collateral Sensitivity (The Trap)
-            reward = 10
-
+            size -= (size * kill_rate)
+            res_a += 0.3
+            res_b -= 0.4 # The Trap: Making the cancer weak to Drug B
+        
         elif action == 2: # Drug B (The Trap)
             kill_rate = 0.85 if res_b < 2.5 else 0.05
-            # By setting it at 0.85, the AI has to decide: "Do I use the hammer once? Or do I need to use it multiple times to finish the job?"
-
             size -= (size * kill_rate)
             res_b += 0.5
-            reward = 100 if kill_rate > 0.8 else -20
 
-        # why use drug A and B instead of real drugs
-        '''
-        In physics, you learn about "frictionless surfaces" or "ideal gases." 
-        In AI medicine, we use "Drug A" to represent a Class of Action.
+        # 4. NEW REWARD LOGIC (The "Peacekeeper" Pivot)
+        reward = 0
+        
+        # A. Shrinkage Bonus: Reward the AI for the AMOUNT it shrinks the tumor
+        shrinkage = size_before - size
+        if shrinkage > 0:
+            reward += (shrinkage * 0.5)  # 0.5 points for every unit killed
+        else:
+            reward -= (abs(shrinkage) * 1.0) # Heavier penalty for letting it grow
 
-        Drug A represents any drug that targets a 
-        specific protein (like an Oncogene).
+        # B. Toxicity Penalties (Keeping it alive)
+        if self.consecutive_drugs >= 5:
+            reward -= 500  # Penalty for pushing the patient too hard
+        
+        reward -= (self.toxicity * 2.0) # Constant small "nudge" to keep toxicity low
 
-        Drug B represents the "Counter-attack" drug.
-        By keeping the names general, your code is actually more powerful. 
-        It means your AI could be used for any two drugs that have a 
-        "Trade-off" (Collateral Sensitivity) relationship, not just one specific chemical.
-        '''
+        # C. Strategic "Trap" Bonus (Optional but helpful)
+        # Give a tiny "hint" when the AI successfully lowers Resistance B
+        if action == 1 and res_b < 5.0:
+            reward += 5 
 
-        reward -= (size * 0.1)
+        # 5. Termination Logic
         self.state = np.array([size, res_a, res_b, self.toxicity], dtype=np.float32)
         
-        done = bool(size < 1 or self.day >= 60)
-        # side is small enough or timeout
-
-        if size < 1: reward += 1000
+        done = bool(size < 1 or self.day >= 60 or self.toxicity > 10.0)
+        
+        if size < 1: 
+            reward += 2000 # Massive jackpot for curing the cancer
+        elif self.day >= 60:
+            reward -= 500 # Penalty for failing to cure in time
+            
         return self.state, reward, done, False, {}
