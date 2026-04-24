@@ -97,6 +97,105 @@ def create_tumor_visualization(tumor_size, res_level_or_list, max_res=15.0, jell
     
     return fig
 
+
+def init_tumor_canvas(tumor_size, res_level_or_list, max_res=15.0, jelly_intensity=0.0, jelly_phase=0):
+    fig, ax = plt.subplots(figsize=(8, 8), facecolor='#0E1117', dpi=80)
+    ax.set_facecolor('#161B22')
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.set_aspect('equal')
+    ax.axis('off')
+
+    if 'cell_coordinates' not in st.session_state:
+        st.session_state.cell_coordinates = np.random.rand(20000, 2)
+
+    num_cells = int(min(len(st.session_state.cell_coordinates), max(1, tumor_size)))
+    cell_coords = st.session_state.cell_coordinates[:num_cells].copy()
+    if jelly_intensity > 0 and num_cells > 0:
+        intensity = min(0.22, jelly_intensity)
+        phase = jelly_phase * np.pi / 4
+        offsets_x = np.sin(2 * np.pi * (cell_coords[:, 0] + phase)) * intensity * (1 - cell_coords[:, 1])
+        offsets_y = np.cos(2 * np.pi * (cell_coords[:, 1] + phase)) * intensity * (1 - cell_coords[:, 0])
+        cell_coords = np.clip(cell_coords + np.stack([offsets_x, offsets_y], axis=1), 0, 1)
+
+    if isinstance(res_level_or_list, (list, np.ndarray)):
+        cell_resistances = np.array(res_level_or_list[:num_cells])
+        if len(cell_resistances) < num_cells:
+            avg_res = np.mean(cell_resistances) if len(cell_resistances) > 0 else max_res / 2
+            cell_resistances = np.pad(cell_resistances, (0, num_cells - len(cell_resistances)), constant_values=avg_res)
+        avg_resistance = np.mean(cell_resistances)
+    else:
+        cell_resistances = np.full(num_cells, res_level_or_list)
+        avg_resistance = res_level_or_list
+
+    norm_resistances = np.clip(cell_resistances / max_res, 0, 1)
+    scatter = ax.scatter(
+        cell_coords[:, 0],
+        cell_coords[:, 1],
+        s=12,
+        c=norm_resistances,
+        cmap='YlOrRd',
+        alpha=0.95,
+        edgecolors='none',
+        vmin=0,
+        vmax=1,
+    )
+
+    title_text = fig.text(0.5, 0.95, f"Tumor Cells: {num_cells:,} | Average Resistance: {avg_resistance:.1f}",
+                          ha='center', fontsize=12, color='#C9D1D9', weight='bold')
+    norm_avg = min(1.0, avg_resistance / max_res)
+    if norm_avg > 0.7:
+        status = "⚠️ HIGH RESISTANCE"
+        status_color = '#FF2222'
+    else:
+        status = "✓ LOW RESISTANCE"
+        status_color = '#22FF22'
+    status_text = fig.text(0.5, 0.02, status, ha='center', fontsize=11, color=status_color, weight='bold')
+
+    return fig, ax, scatter, title_text, status_text
+
+
+def update_tumor_canvas(fig, scatter, title_text, status_text, tumor_size, res_level_or_list, max_res=15.0, jelly_intensity=0.0, jelly_phase=0):
+    if 'cell_coordinates' not in st.session_state:
+        st.session_state.cell_coordinates = np.random.rand(20000, 2)
+
+    num_cells = int(min(len(st.session_state.cell_coordinates), max(1, tumor_size)))
+    cell_coords = st.session_state.cell_coordinates[:num_cells].copy()
+    if jelly_intensity > 0 and num_cells > 0:
+        intensity = min(0.22, jelly_intensity)
+        phase = jelly_phase * np.pi / 4
+        offsets_x = np.sin(2 * np.pi * (cell_coords[:, 0] + phase)) * intensity * (1 - cell_coords[:, 1])
+        offsets_y = np.cos(2 * np.pi * (cell_coords[:, 1] + phase)) * intensity * (1 - cell_coords[:, 0])
+        cell_coords = np.clip(cell_coords + np.stack([offsets_x, offsets_y], axis=1), 0, 1)
+
+    if isinstance(res_level_or_list, (list, np.ndarray)):
+        cell_resistances = np.array(res_level_or_list[:num_cells])
+        if len(cell_resistances) < num_cells:
+            avg_res = np.mean(cell_resistances) if len(cell_resistances) > 0 else max_res / 2
+            cell_resistances = np.pad(cell_resistances, (0, num_cells - len(cell_resistances)), constant_values=avg_res)
+        avg_resistance = np.mean(cell_resistances)
+    else:
+        cell_resistances = np.full(num_cells, res_level_or_list)
+        avg_resistance = res_level_or_list
+
+    norm_resistances = np.clip(cell_resistances / max_res, 0, 1)
+    scatter.set_offsets(cell_coords)
+    scatter.set_array(norm_resistances)
+
+    title_text.set_text(f"Tumor Cells: {num_cells:,} | Average Resistance: {avg_resistance:.1f}")
+    norm_avg = min(1.0, avg_resistance / max_res)
+    if norm_avg > 0.7:
+        status = "⚠️ HIGH RESISTANCE"
+        status_color = '#FF2222'
+    else:
+        status = "✓ LOW RESISTANCE"
+        status_color = '#22FF22'
+    status_text.set_text(status)
+    status_text.set_color(status_color)
+
+    fig.canvas.draw_idle()
+    return fig
+
 # --- CONFIGURATION ---
 st.set_page_config(
     page_title="The Peacekeeper: AI Immunotherapy",
@@ -287,33 +386,34 @@ if uploaded_file is not None:
             animate_transition = st.session_state.animate_transition
             if animate_transition:
                 prev_size = history[st.session_state.previous_day_view]["Tumor Size"]
-            else:
-                prev_size = tumor_size
-            
-            if animate_transition:
+                fig, ax, scatter, title_text, status_text = init_tumor_canvas(prev_size, cell_resistance)
+                canvas = st.pyplot(fig)
                 steps = 6
                 size_diff = tumor_size - prev_size
                 growth_factor = abs(size_diff) / max(prev_size, 1)
                 for frame in range(steps + 1):
-                    phase = frame
                     t = frame / steps
                     interpolated_size = int(prev_size + size_diff * t)
                     jelly_intensity = 0.08 + min(0.4, growth_factor * 0.35)
                     if size_diff > 0:
                         jelly_intensity += 0.08
-                    fig = create_tumor_visualization(
+                    update_tumor_canvas(
+                        fig,
+                        scatter,
+                        title_text,
+                        status_text,
                         interpolated_size,
                         cell_resistance,
                         jelly_intensity=jelly_intensity,
-                        jelly_phase=phase,
+                        jelly_phase=frame,
                     )
                     animation_placeholder.pyplot(fig)
-                    plt.close(fig)
                     if frame < steps:
                         time.sleep(0.08)
                 st.session_state.animate_transition = False
+                plt.close(fig)
             else:
-                fig = create_tumor_visualization(tumor_size, cell_resistance)
+                fig, ax, scatter, title_text, status_text = init_tumor_canvas(tumor_size, cell_resistance)
                 animation_placeholder.pyplot(fig)
                 plt.close(fig)
         
