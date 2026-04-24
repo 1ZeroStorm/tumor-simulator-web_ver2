@@ -9,23 +9,33 @@ import plotly.graph_objects as go
 import os
 
 # --- HELPER FUNCTION: TUMOR VISUALIZATION ---
-def create_tumor_visualization(tumor_size, res_level, max_res=15.0):
+def create_tumor_visualization(tumor_size, resistance_list, max_res=15.0):
     """
-    Fixed color mapping for dots and high-performance Scattergl rendering.
+    High-performance tumor cell visualization.
+    Maps individual resistance values to colors for every single cell.
     """
     if 'cell_coordinates' not in st.session_state:
+        # Persistent coordinate pool to keep cell positions stable during refresh
         st.session_state.cell_coordinates = np.random.rand(20000, 2)
 
     num_cells = int(min(len(st.session_state.cell_coordinates), max(1, tumor_size)))
     cell_coords = st.session_state.cell_coordinates[:num_cells].copy()
 
-    # Create a simple color array based on the resistance provided
-    # Standardizing to a float between 0 and 1 for the colorscale
-    res_val = float(res_level)
-    norm_res = np.clip(res_val / max_res, 0, 1)
-    
-    # Generate an array of the same value for all points to satisfy the colorscale mapping
-    colors = np.full(num_cells, norm_res)
+    # 1. Handle Resistance Data
+    # If we have a list of individual resistances, we slice it to match current population
+    if isinstance(resistance_list, (list, np.ndarray)) and len(resistance_list) > 0:
+        # We cycle or pad the list if the current tumor size exceeds our data sample
+        if len(resistance_list) < num_cells:
+            repeats = (num_cells // len(resistance_list)) + 1
+            current_resistances = np.tile(resistance_list, repeats)[:num_cells]
+        else:
+            current_resistances = np.array(resistance_list[:num_cells])
+    else:
+        # Fallback if no list is provided (e.g. initial load)
+        current_resistances = np.full(num_cells, resistance_list if isinstance(resistance_list, (int, float)) else 5.0)
+
+    # 2. Normalize for colorscale (0 to 1)
+    norm_colors = np.clip(current_resistances / max_res, 0, 1)
 
     fig = go.Figure(
         data=[
@@ -35,19 +45,19 @@ def create_tumor_visualization(tumor_size, res_level, max_res=15.0):
                 mode='markers',
                 marker=dict(
                     size=5,
-                    color=colors,
-                    colorscale='YlOrRd', # Valid Plotly Colorscale
+                    color=norm_colors,
+                    colorscale='YlOrRd', 
                     cmin=0,
                     cmax=1,
                     showscale=True,
                     colorbar=dict(
-                        title='Resistance', 
+                        title='Individual Resistance', 
                         thickness=10, 
                         tickfont=dict(color='#888888')
                     ),
                     opacity=0.8
                 ),
-                hovertemplate='Resistance: %{marker.color:.2f}<extra></extra>'
+                hovertemplate='Cell Resistance: %{marker.color:.2f}<extra></extra>'
             )
         ]
     )
@@ -60,7 +70,7 @@ def create_tumor_visualization(tumor_size, res_level, max_res=15.0):
         xaxis=dict(visible=False),
         yaxis=dict(visible=False, scaleanchor='x'),
         title=dict(
-            text=f"Population: {num_cells:,}", 
+            text=f"Live Population: {num_cells:,} cells", 
             x=0.5, 
             font=dict(color='#888888', size=14)
         ),
@@ -92,20 +102,16 @@ st.sidebar.header("Patient Data Input")
 data_mode = st.sidebar.radio("Select Data Source:", ["Upload CSV", "Use Default Synthetic Data"])
 
 uploaded_file = None
-current_data_source = None
-
 if data_mode == "Upload CSV":
     uploaded_file = st.sidebar.file_uploader("Upload Proteomic CSV", type=["csv"])
-    if uploaded_file: current_data_source = uploaded_file.name
 else:
     if os.path.exists(DEFAULT_DATA_PATH):
         uploaded_file = DEFAULT_DATA_PATH
-        current_data_source = "default_synthetic_data"
 
 if 'treatment_history' not in st.session_state:
     st.session_state.treatment_history = None
-if 'current_day_view' not in st.session_state:
-    st.session_state.current_day_view = 0
+if 'cell_res_data' not in st.session_state:
+    st.session_state.cell_res_data = []
 
 if uploaded_file is not None:
     data = pd.read_csv(uploaded_file)
@@ -114,6 +120,8 @@ if uploaded_file is not None:
     try:
         analyzer = PatientAnalyzer(df=data)
         profile = analyzer.get_patient_profile(data)
+        # Fetch individual resistance levels for all tumor cells
+        st.session_state.cell_res_data = analyzer.get_cell_resistance_data() 
     except Exception as e:
         st.error(f"Error: {e}")
         st.stop()
@@ -124,11 +132,10 @@ if uploaded_file is not None:
             obs, _ = env.reset()
             history = []
             
-            # Initial states
             curr_sz, curr_ra, curr_rb = obs[0], obs[1], obs[2]
             
             for day in range(1, 31):
-                # 1. Before State (Captures duplication/growth from previous day)
+                # 1. Before State
                 history.append({
                     "Day": day,
                     "Status": "Before Drug",
@@ -144,8 +151,6 @@ if uploaded_file is not None:
                 act_map = {0: "Rest", 1: "Drug A", 2: "Drug B"}
                 
                 obs, reward, terminated, truncated, info = env.step(act_int)
-                
-                # Update states for "After" and next "Before"
                 curr_sz, curr_ra, curr_rb = obs[0], obs[1], obs[2]
                 
                 history.append({
@@ -164,7 +169,6 @@ if uploaded_file is not None:
     if st.session_state.treatment_history:
         df_hist = pd.DataFrame(st.session_state.treatment_history)
 
-        # --- VISUALIZATION SECTION ---
         st.markdown("---")
         day_to_show = st.slider("Select Day to Visualize", 1, int(df_hist['Day'].max()), 1)
         
@@ -175,50 +179,16 @@ if uploaded_file is not None:
         v_col1, v_col2 = st.columns(2)
         with v_col1:
             st.markdown("<p style='text-align:center; color:#888888;'>Before Treatment</p>", unsafe_allow_html=True)
-            st.plotly_chart(create_tumor_visualization(b_row["Tumor Size"], b_row["Resist A"]), use_container_width=True)
+            # Pass the individual cell resistance list to the visualization
+            st.plotly_chart(create_tumor_visualization(b_row["Tumor Size"], st.session_state.cell_res_data), use_container_width=True)
         with v_col2:
             st.markdown(f"<p style='text-align:center; color:#888888;'>After {a_row['Action']}</p>", unsafe_allow_html=True)
-            st.plotly_chart(create_tumor_visualization(a_row["Tumor Size"], a_row["Resist A"]), use_container_width=True)
+            st.plotly_chart(create_tumor_visualization(a_row["Tumor Size"], st.session_state.cell_res_data), use_container_width=True)
 
-        # --- LOG TABLE ---
+        # ... Rest of logging and chart code ...
         st.markdown("---")
         st.subheader("📊 Treatment & Evolution Log")
-        
-        # Formatting Resist A and B to 2 decimal places
         formatted_df = df_hist.copy()
         formatted_df["Resist A"] = formatted_df["Resist A"].map(lambda x: f"{x:.2f}")
         formatted_df["Resist B"] = formatted_df["Resist B"].map(lambda x: f"{x:.2f}")
-        
         st.dataframe(formatted_df, use_container_width=True, hide_index=True)
-
-        # --- UPDATED CHART ---
-        st.markdown("---")
-        st.subheader("📈 Tumor Size Dynamics")
-        fig, ax = plt.subplots(figsize=(10, 4), facecolor='#0E1117')
-        ax.set_facecolor('#161B22')
-        
-        days = df_hist[df_hist['Status'] == "Before Drug"]['Day']
-        b_vals = df_hist[df_hist['Status'] == "Before Drug"]['Tumor Size']
-        a_vals = df_hist[df_hist['Status'].str.contains("After")]['Tumor Size']
-        
-        x = np.arange(len(days))
-        ax.bar(x - 0.2, b_vals, 0.4, label='Before Drug', color='#E74C3C', alpha=0.6)
-        ax.bar(x + 0.2, a_vals, 0.4, label='After Drug', color='#2ECC71', alpha=0.8)
-        
-        # Grey Labels and Axis Setup
-        ax.set_xlabel('Timeline (Treatment Days)', color='#888888', fontsize=10)
-        ax.set_ylabel('Cell Count (Tumor Size)', color='#888888', fontsize=10)
-        ax.set_xticks(x)
-        ax.set_xticklabels(days, color='#888888')
-        ax.tick_params(axis='y', labelcolor='#888888')
-        
-        # Removing spines for a cleaner look
-        for spine in ax.spines.values():
-            spine.set_edgecolor('#30363D')
-
-        ax.legend(facecolor='#161B22', edgecolor='#30363D', labelcolor='#888888')
-        plt.tight_layout()
-        st.pyplot(fig)
-
-else:
-    st.info("Select a data source in the sidebar to begin.")
