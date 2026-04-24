@@ -7,41 +7,61 @@ from environment import CancerSimulation
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import os
+import time
 
 # --- HELPER FUNCTION: TUMOR VISUALIZATION ---
-def create_tumor_visualization(tumor_size, title=""):
-    """Create a dark-mode tumor visualization with microscopic nodes"""
-    fig, ax = plt.subplots(figsize=(8, 6), facecolor='#0E1117')
+def create_tumor_visualization(tumor_size, res_level, max_res=15.0):
+    """
+    High-performance tumor visualization.
+    tumor_size: Number of dots to display
+    res_level: Current resistance (determines redness)
+    """
+    # 1. Manage Dot Persistence (The 'Jelly' effect)
+    # We store coordinates in session state so they don't jump around
+    if 'cell_coords' not in st.session_state:
+        # Start with a large pool of potential coordinates (up to 5000)
+        st.session_state.cell_coords = np.random.rand(5000, 2)
+    
+    # 2. Determine how many dots to show
+    # If tumor_size is 1500, we take the first 1500 coords
+    num_dots = int(min(len(st.session_state.cell_coords), tumor_size))
+    current_coords = st.session_state.cell_coords[:num_dots]
+    
+    # 3. Dynamic Color Mapping (Blue -> Red based on resistance)
+    # Normalize resistance: 0 is blue, 1 is pure red
+    norm_res = min(1.0, res_level / max_res)
+    
+    # Color logic: Red increases with resistance, Blue decreases
+    colors = []
+    # Using a single color for the whole 'colony' for performance, 
+    # or you can slightly randomize each dot's color for "micro-variation"
+    main_color = (norm_res, 0.2, 1 - norm_res, 0.8) # (R, G, B, Alpha)
+
+    fig, ax = plt.subplots(figsize=(6, 6), facecolor='#0E1117')
     ax.set_facecolor('#161B22')
     
-    # Calculate number of tumor nodes based on size
-    # Scale: higher tumor size = more dots
-    num_tumors = max(10, int(tumor_size / 100))
-    num_tumors = min(200, num_tumors)  # Cap at 200 for visibility
+    # 4. The Scatter Plot (The actual 'Cells')
+    ax.scatter(
+        current_coords[:, 0], 
+        current_coords[:, 1], 
+        s=15,               # Size of individual cell
+        c=[main_color],     # Apply the resistance color
+        edgecolors='none',
+        alpha=0.6
+    )
     
-    # Generate random positions for tumor nodes
-    np.random.seed(hash(title) % 2**32)  # Consistent positioning
-    x_positions = np.random.uniform(0.1, 0.9, num_tumors)
-    y_positions = np.random.uniform(0.1, 0.9, num_tumors)
-    
-    # Vary dot sizes for more realistic tumor appearance
-    sizes = np.random.uniform(20, 150, num_tumors)
-    
-    # Create gradient effect with different colors
-    scatter = ax.scatter(x_positions, y_positions, s=sizes, 
-                        c=np.random.uniform(0.3, 1, num_tumors), 
-                        cmap='Reds', alpha=0.7, edgecolors='#FF6B6B', linewidth=0.5)
-    
+    # Styling to make it look like a microscope slide
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
     ax.axis('off')
     
-    # Add title with tumor count
-    fig.text(0.5, 0.95, title, ha='center', fontsize=14, color='#C9D1D9', weight='bold')
-    fig.text(0.5, 0.02, f"Estimated Tumor Cells: {num_tumors * 100}", 
-            ha='center', fontsize=10, color='#8B949E', style='italic')
-    
-    return fig
+    # Add a glowing 'aura' effect if the resistance is high
+    if norm_res > 0.7:
+        ax.patch.set_edgecolor('red')
+        ax.patch.set_linewidth(2)
+        ax.set_title("⚠️ HIGH RESISTANCE DETECTED", color='red', fontsize=10)
+
+    st.pyplot(fig)
 
 # --- CONFIGURATION ---
 st.set_page_config(page_title="The Peacekeeper: AI Immunotherapy", layout="wide")
@@ -154,6 +174,33 @@ if uploaded_file is not None:
         # Store history in session state
         st.session_state.treatment_history = history
         st.session_state.current_day_view = 0
+    
+    # --- ANIMATED SIMULATION BUTTON ---
+    if st.session_state.treatment_history is not None:
+        history = st.session_state.treatment_history
+        # Get the last state values for simulation
+        last_history = history[-1]
+        res_level = last_history['Resist_A']  # Use resistance level for visualization
+        
+        if st.button("Simulate Next Day"):
+            # Get the next target size (simulated)
+            current_display_size = last_history['Tumor Size']
+            # Simulate a next state (for demo, assume 10% reduction)
+            new_state_size = max(0, current_display_size * 0.9)
+            
+            # "Jelly" Animation Loop
+            steps = 5
+            increment = (new_state_size - current_display_size) / steps
+            
+            placeholder = st.empty() # Create a space for the tumor
+            
+            for i in range(steps):
+                current_display_size += increment
+                with placeholder.container():
+                    create_tumor_visualization(current_display_size, res_level)
+                time.sleep(0.05) # Small pause for smoothness
+                
+            st.session_state.last_size = new_state_size
     
     # Display results if history exists
     if st.session_state.treatment_history is not None:
