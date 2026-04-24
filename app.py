@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import os
 import time
+import io
 
 # --- HELPER FUNCTION: TUMOR VISUALIZATION ---
 def create_tumor_visualization(tumor_size, res_level_or_list, max_res=15.0, jelly_intensity=0.0, jelly_phase=0):
@@ -195,6 +196,13 @@ def update_tumor_canvas(fig, scatter, title_text, status_text, tumor_size, res_l
 
     fig.canvas.draw_idle()
     return fig
+
+
+def fig_to_image_bytes(fig):
+    buf = io.BytesIO()
+    fig.savefig(buf, format='png', bbox_inches='tight', facecolor=fig.get_facecolor(), dpi=80)
+    buf.seek(0)
+    return buf
 
 # --- CONFIGURATION ---
 st.set_page_config(
@@ -387,16 +395,15 @@ if uploaded_file is not None:
             if animate_transition:
                 prev_size = history[st.session_state.previous_day_view]["Tumor Size"]
                 fig, ax, scatter, title_text, status_text = init_tumor_canvas(prev_size, cell_resistance)
-                canvas = st.pyplot(fig)
-                steps = 6
+                steps = 8
                 size_diff = tumor_size - prev_size
                 growth_factor = abs(size_diff) / max(prev_size, 1)
                 for frame in range(steps + 1):
                     t = frame / steps
                     interpolated_size = int(prev_size + size_diff * t)
-                    jelly_intensity = 0.08 + min(0.4, growth_factor * 0.35)
+                    jelly_intensity = 0.06 + min(0.35, growth_factor * 0.35)
                     if size_diff > 0:
-                        jelly_intensity += 0.08
+                        jelly_intensity += 0.06
                     update_tumor_canvas(
                         fig,
                         scatter,
@@ -407,14 +414,14 @@ if uploaded_file is not None:
                         jelly_intensity=jelly_intensity,
                         jelly_phase=frame,
                     )
-                    animation_placeholder.pyplot(fig)
+                    animation_placeholder.image(fig_to_image_bytes(fig), use_column_width=True)
                     if frame < steps:
-                        time.sleep(0.08)
+                        time.sleep(0.07)
                 st.session_state.animate_transition = False
                 plt.close(fig)
             else:
                 fig, ax, scatter, title_text, status_text = init_tumor_canvas(tumor_size, cell_resistance)
-                animation_placeholder.pyplot(fig)
+                animation_placeholder.image(fig_to_image_bytes(fig), use_column_width=True)
                 plt.close(fig)
         
         st.markdown("---")
