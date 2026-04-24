@@ -222,16 +222,19 @@ if uploaded_file is not None:
         st.subheader("🔬 Microscopic Tumor Evolution")
         
         # Color Legend
-        st.info("""
-        **Resistance Level Gradient:**
-        
-        🟨 Yellow → 🟧 Orange → 🔴 Red
-        
-        **Left (Yellow)** = Low Resistance → **Right (Red)** = High Resistance
-        
-        Each individual dot's color represents its drug resistance level on a continuous scale.
-        The gradient helps visualize tumor heterogeneity and treatment susceptibility.
-        """)
+        st.markdown("""
+        <div style='padding: 16px; border-radius: 14px; background-color: #0D1117; color: #C9D1D9; border: 1px solid #30363D;'>
+          <strong>Resistance Level Gradient:</strong>
+          <div style='margin: 12px 0; height: 20px; border-radius: 12px; background: linear-gradient(90deg, #FFFFB2 0%, #FED976 25%, #FD8D3C 50%, #F03B20 75%, #BD0026 100%);'></div>
+          <div style='display: flex; justify-content: space-between; font-size: 0.95rem;'>
+            <span>Low resistance</span>
+            <span>High resistance</span>
+          </div>
+          <div style='margin-top: 10px; font-size: 0.95rem;'>
+            Each dot's color is mapped to resistance level on a continuous scale, from cooler low-resistance tones to warmer high-resistance tones.
+          </div>
+        </div>
+        """, unsafe_allow_html=True)
         
         # Day Navigation Controls
         nav_col1, nav_col2, nav_col3, nav_col4, nav_col5 = st.columns([1, 1, 3, 1, 1])
