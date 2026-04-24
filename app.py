@@ -6,6 +6,7 @@ from analyzer import PatientAnalyzer
 from environment import CancerSimulation
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
+import plotly.graph_objects as go
 import os
 import time
 
@@ -13,88 +14,66 @@ import time
 def create_tumor_visualization(tumor_size, res_level_or_list, max_res=15.0, jelly_intensity=0.0, jelly_phase=0):
     """
     High-performance tumor cell visualization.
-    Each dot = 1 tumor cell. Color gradient based on resistance (Blue -> Red).
+    Each dot = 1 tumor cell. Color gradient based on resistance.
     
     res_level_or_list: Either a single float (average resistance) or list of individual resistances
     """
     # 1. Initialize persistent cell coordinate pool in session state
-    # This ensures coordinates don't change when switching days (the "jelly" effect)
     if 'cell_coordinates' not in st.session_state:
-        # Create a large pool of random cell positions (up to 20,000 cells)
         st.session_state.cell_coordinates = np.random.rand(20000, 2)
-    
+
     # 2. Get exact number of cells to display
     num_cells = int(min(len(st.session_state.cell_coordinates), max(1, tumor_size)))
-    
+
     # Use the first N cells from our persistent pool
     cell_coords = st.session_state.cell_coordinates[:num_cells].copy()
 
-    # Apply a jelly-like motion effect when requested
-    if jelly_intensity > 0 and num_cells > 0:
-        intensity = min(0.22, jelly_intensity)
-        phase = jelly_phase * np.pi / 4
-        offsets_x = np.sin(2 * np.pi * (cell_coords[:, 0] + phase)) * intensity * (1 - cell_coords[:, 1])
-        offsets_y = np.cos(2 * np.pi * (cell_coords[:, 1] + phase)) * intensity * (1 - cell_coords[:, 0])
-        cell_coords = np.clip(cell_coords + np.stack([offsets_x, offsets_y], axis=1), 0, 1)
-    
     # 3. Determine resistance values for each cell
     if isinstance(res_level_or_list, (list, np.ndarray)):
-        # Use individual cell resistance levels
         cell_resistances = np.array(res_level_or_list[:num_cells])
-        # Pad with average if we have fewer resistance values than cells
         if len(cell_resistances) < num_cells:
             avg_res = np.mean(cell_resistances) if len(cell_resistances) > 0 else max_res / 2
-            cell_resistances = np.pad(cell_resistances, (0, num_cells - len(cell_resistances)), 
-                                     constant_values=avg_res)
+            cell_resistances = np.pad(cell_resistances, (0, num_cells - len(cell_resistances)), constant_values=avg_res)
         avg_resistance = np.mean(cell_resistances)
     else:
-        # Use single resistance level for all cells
         cell_resistances = np.full(num_cells, res_level_or_list)
         avg_resistance = res_level_or_list
-    
-    # 4. Create color gradient based on individual cell resistance levels
+
     norm_resistances = np.clip(cell_resistances / max_res, 0, 1)
-    
-    # 5. Render the tumor visualization
-    fig, ax = plt.subplots(figsize=(8, 8), facecolor='#0E1117', dpi=80)
-    ax.set_facecolor('#161B22')
-    
-    # Plot each cell as a small dot with the gradient colors
-    # Pass the normalized resistance values and let matplotlib apply the colormap
-    scatter = ax.scatter(
-        cell_coords[:, 0],
-        cell_coords[:, 1],
-        s=12,  # Slightly larger dots for better color visibility
-        c=norm_resistances,  # Pass normalized values directly
-        cmap='YlOrRd',  # Yellow-Orange-Red gradient
-        alpha=0.95,  # Higher opacity for better color contrast
-        edgecolors='none',
-        vmin=0,
-        vmax=1
+
+    fig = go.Figure(
+        data=[
+            go.Scattergl(
+                x=cell_coords[:, 0],
+                y=cell_coords[:, 1],
+                mode='markers',
+                marker=dict(
+                    size=6,
+                    color=norm_resistances,
+                    colorscale='YlOrRd',
+                    cmin=0,
+                    cmax=1,
+                    showscale=True,
+                    colorbar=dict(title='Resistance', thickness=12, len=0.65, y=0.5, ticks='outside', tickfont=dict(color='#C9D1D9')),
+                    opacity=0.85,
+                    line=dict(width=0)
+                ),
+                hovertemplate='Resistance: %{marker.color:.2f}<extra></extra>'
+            )
+        ]
     )
-    
-    # Style the plot
-    ax.set_xlim(0, 1)
-    ax.set_ylim(0, 1)
-    ax.set_aspect('equal')
-    ax.axis('off')
-    
-    # Add info text
-    title_text = f"Tumor Cells: {num_cells:,} | Average Resistance: {avg_resistance:.1f}"
-    fig.text(0.5, 0.95, title_text, ha='center', fontsize=12, 
-             color='#C9D1D9', weight='bold')
-    
-    # Add resistance status indicator
-    norm_avg = min(1.0, avg_resistance / max_res)
-    if norm_avg > 0.7:
-        status = "⚠️ HIGH RESISTANCE"
-        color = '#FF2222'
-    else:
-        status = "✓ LOW RESISTANCE"
-        color = '#22FF22'
-    
-    fig.text(0.5, 0.02, status, ha='center', fontsize=11, color=color, weight='bold')
-    
+
+    fig.update_layout(
+        template=None,
+        paper_bgcolor='#0E1117',
+        plot_bgcolor='#161B22',
+        margin=dict(l=10, r=10, t=50, b=10),
+        xaxis=dict(visible=False, range=[0, 1]),
+        yaxis=dict(visible=False, range=[0, 1], scaleanchor='x'),
+        title=dict(text=f'Tumor Cells: {num_cells:,} | Avg Resistance: {avg_resistance:.1f}', x=0.5, font=dict(color='#C9D1D9', size=14)),
+        font=dict(color='#C9D1D9'),
+    )
+
     return fig
 
 # --- CONFIGURATION ---
@@ -275,8 +254,7 @@ if uploaded_file is not None:
         # Tumor display
         st.markdown("---")
         fig = create_tumor_visualization(tumor_size, cell_resistance)
-        st.pyplot(fig)
-        plt.close(fig)
+        st.plotly_chart(fig, use_container_width=True)
         
         st.markdown("---")
         toggle_col1, toggle_col2 = st.columns([1, 1])
@@ -295,27 +273,23 @@ if uploaded_file is not None:
             with vis_col1:
                 st.markdown("<h4 style='text-align: center;'>🔴 Before Treatment</h4>", unsafe_allow_html=True)
                 fig_before = create_tumor_visualization(tumor_before, cell_resistance)
-                st.pyplot(fig_before)
-                plt.close(fig_before)
+                st.plotly_chart(fig_before, use_container_width=True)
             
             with vis_col2:
                 st.markdown("<h4 style='text-align: center;'>🟢 After Treatment</h4>", unsafe_allow_html=True)
                 fig_after = create_tumor_visualization(current_day_data["Tumor Size"], cell_resistance)
-                st.pyplot(fig_after)
-                plt.close(fig_after)
+                st.plotly_chart(fig_after, use_container_width=True)
         
         elif show_before:
             st.markdown("<h4 style='text-align: center;'>🔴 Before Treatment</h4>", unsafe_allow_html=True)
             tumor_before = int(current_day_data["Tumor Size"] * 1.15)
             fig_before = create_tumor_visualization(tumor_before, cell_resistance)
-            st.pyplot(fig_before)
-            plt.close(fig_before)
+            st.plotly_chart(fig_before, use_container_width=True)
         
         elif show_after:
             st.markdown("<h4 style='text-align: center;'>🟢 After Treatment</h4>", unsafe_allow_html=True)
             fig_after = create_tumor_visualization(current_day_data["Tumor Size"], cell_resistance)
-            st.pyplot(fig_after)
-            plt.close(fig_after)
+            st.plotly_chart(fig_after, use_container_width=True)
         
         # Display current day details
         st.markdown("---")
