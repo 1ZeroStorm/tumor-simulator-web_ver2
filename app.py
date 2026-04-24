@@ -54,7 +54,7 @@ def create_tumor_visualization(tumor_size, res_level, max_res=15.0):
     # Style the plot
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
-    ax.aspect('equal')
+    ax.set_aspect('equal')
     ax.axis('off')
     
     # Add info text
