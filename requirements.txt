@@ -4,3 +4,4 @@ numpy
 gymnasium
 stable-baselines3
 matplotlib
+plotly
