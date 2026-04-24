@@ -46,23 +46,15 @@ def create_tumor_visualization(tumor_size, title=""):
 # --- CONFIGURATION ---
 st.set_page_config(page_title="The Peacekeeper: AI Immunotherapy", layout="wide")
 
+MODEL_PATH = "peacekeeper_final_azure" # Do not add .zip here
+
 @st.cache_resource
-def load_resources():
-    # Load the pre-trained PPO model
-    model_path = "ppo_cancer_policy"
-    
-    # Check if model file exists
-    if not os.path.exists(f"{model_path}.zip"):
-        st.error("⚠️ Model not found! Please train the model first by running: `python train.py`")
-        st.info("The model file should be saved as 'ppo_cancer_policy.zip' in the project directory.")
-        st.stop()
-    
-    try:
-        model = PPO.load(model_path)
-        return model
-    except Exception as e:
-        st.error(f"Error loading PPO model: {e}")
-        st.stop()
+def load_model():
+    if os.path.exists(f"{MODEL_PATH}.zip"):
+        return PPO.load(MODEL_PATH)
+    else:
+        st.error(f"Model file {MODEL_PATH}.zip not found in repository!")
+        return None
 
 st.title("🛡️ The Peacekeeper")
 st.markdown("### Digital Immunotherapy & Evolutionary Trap Optimizer")
@@ -96,7 +88,7 @@ if uploaded_file is not None:
     data = pd.read_csv(uploaded_file)
     st.session_state.uploaded_data = data
     
-    model = load_resources()
+    model = load_model()
     
     try:
         analyzer = PatientAnalyzer(df=data)
