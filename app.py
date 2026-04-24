@@ -10,10 +10,12 @@ import os
 import time
 
 # --- HELPER FUNCTION: TUMOR VISUALIZATION ---
-def create_tumor_visualization(tumor_size, res_level, max_res=15.0):
+def create_tumor_visualization(tumor_size, res_level_or_list, max_res=15.0):
     """
     High-performance tumor cell visualization.
     Each dot = 1 tumor cell. Color gradient based on resistance (Blue -> Red).
+    
+    res_level_or_list: Either a single float (average resistance) or list of individual resistances
     """
     # 1. Initialize persistent cell coordinate pool in session state
     # This ensures coordinates don't change when switching days (the "jelly" effect)
@@ -27,18 +29,31 @@ def create_tumor_visualization(tumor_size, res_level, max_res=15.0):
     # Use the first N cells from our persistent pool
     cell_coords = st.session_state.cell_coordinates[:num_cells]
     
-    # 3. Create color gradient based on resistance level
-    # Normalize resistance: 0 is blue, 1 is red
-    norm_res = min(1.0, max(0.0, res_level / max_res))
+    # 3. Determine resistance values for each cell
+    if isinstance(res_level_or_list, (list, np.ndarray)):
+        # Use individual cell resistance levels
+        cell_resistances = np.array(res_level_or_list[:num_cells])
+        # Pad with average if we have fewer resistance values than cells
+        if len(cell_resistances) < num_cells:
+            avg_res = np.mean(cell_resistances) if len(cell_resistances) > 0 else max_res / 2
+            cell_resistances = np.pad(cell_resistances, (0, num_cells - len(cell_resistances)), 
+                                     constant_values=avg_res)
+        avg_resistance = np.mean(cell_resistances)
+    else:
+        # Use single resistance level for all cells
+        cell_resistances = np.full(num_cells, res_level_or_list)
+        avg_resistance = res_level_or_list
     
-    # Create color array for each cell with enhanced contrast (gradient from bright blue to bright red)
+    # 4. Create color gradient based on individual cell resistance levels
+    norm_resistances = np.clip(cell_resistances / max_res, 0, 1)
+    
+    # Create color array for each cell with enhanced contrast
     colors = np.zeros((num_cells, 3))
-    # Use power function for more dramatic color change
-    colors[:, 0] = norm_res ** 0.7      # Red channel increases dramatically with resistance
-    colors[:, 1] = 0.05                 # Green stays very low for purity
-    colors[:, 2] = (1.0 - norm_res) ** 0.7  # Blue channel decreases dramatically
+    colors[:, 0] = norm_resistances ** 0.7      # Red channel
+    colors[:, 1] = 0.05                         # Green stays very low
+    colors[:, 2] = (1.0 - norm_resistances) ** 0.7  # Blue channel
     
-    # 4. Render the tumor visualization
+    # 5. Render the tumor visualization
     fig, ax = plt.subplots(figsize=(8, 8), facecolor='#0E1117', dpi=80)
     ax.set_facecolor('#161B22')
     
@@ -59,12 +74,13 @@ def create_tumor_visualization(tumor_size, res_level, max_res=15.0):
     ax.axis('off')
     
     # Add info text
-    title_text = f"Tumor Cells: {num_cells:,} | Resistance: {norm_res*100:.0f}%"
+    title_text = f"Tumor Cells: {num_cells:,} | Resistance: {avg_resistance:.1f}"
     fig.text(0.5, 0.95, title_text, ha='center', fontsize=12, 
              color='#C9D1D9', weight='bold')
     
     # Add resistance status indicator
-    if norm_res > 0.7:
+    norm_avg = min(1.0, avg_resistance / max_res)
+    if norm_avg > 0.7:
         status = "⚠️ HIGH RESISTANCE"
         color = '#FF2222'
     else:
@@ -107,6 +123,8 @@ if 'current_day_view' not in st.session_state:
     st.session_state.current_day_view = 0
 if 'current_file_name' not in st.session_state:
     st.session_state.current_file_name = None
+if 'cell_resistance_data' not in st.session_state:
+    st.session_state.cell_resistance_data = None
 
 if uploaded_file is not None:
     # Check if a new file was uploaded (different from the current one)
@@ -131,7 +149,9 @@ if uploaded_file is not None:
     # Step 1: Diagnostic Phase (Neural Network)
     with st.spinner("Analyzing Proteomic Signatures..."):
         profile = analyzer.get_patient_profile(data)
+        cell_resistance = analyzer.get_cell_resistance_data()
         st.session_state.patient_profile = profile
+        st.session_state.cell_resistance_data = cell_resistance
     
     # --- DISPLAY DIAGNOSTIC SUMMARY ---
     col1, col2, col3 = st.columns(3)
@@ -223,6 +243,7 @@ if uploaded_file is not None:
         current_day_data = history[current_idx]
         res_level = current_day_data["Resist_A"]
         tumor_size = current_day_data["Tumor Size"]
+        cell_resistance = st.session_state.cell_resistance_data or res_level
         
         # Smooth Animation: "Bloop" effect for tumor growth/shrinkage
         st.markdown("---")
@@ -241,7 +262,7 @@ if uploaded_file is not None:
                 interpolated_size = int(prev_size + (tumor_size - prev_size) * (frame / steps))
                 
                 # Create figure for this frame
-                fig = create_tumor_visualization(interpolated_size, res_level)
+                fig = create_tumor_visualization(interpolated_size, cell_resistance)
                 animation_placeholder.pyplot(fig)
                 plt.close(fig)
                 
@@ -262,32 +283,29 @@ if uploaded_file is not None:
             
             # Estimate tumor size before drug (slightly larger)
             tumor_before = int(current_day_data["Tumor Size"] * 1.15)
-            res_level = current_day_data["Resist_A"]
             
             with vis_col1:
                 st.markdown("<h4 style='text-align: center;'>🔴 Before Treatment</h4>", unsafe_allow_html=True)
-                fig_before = create_tumor_visualization(tumor_before, res_level)
+                fig_before = create_tumor_visualization(tumor_before, cell_resistance)
                 st.pyplot(fig_before)
                 plt.close(fig_before)
             
             with vis_col2:
                 st.markdown("<h4 style='text-align: center;'>🟢 After Treatment</h4>", unsafe_allow_html=True)
-                fig_after = create_tumor_visualization(current_day_data["Tumor Size"], res_level)
+                fig_after = create_tumor_visualization(current_day_data["Tumor Size"], cell_resistance)
                 st.pyplot(fig_after)
                 plt.close(fig_after)
         
         elif show_before:
             st.markdown("<h4 style='text-align: center;'>🔴 Before Treatment</h4>", unsafe_allow_html=True)
             tumor_before = int(current_day_data["Tumor Size"] * 1.15)
-            res_level = current_day_data["Resist_A"]
-            fig_before = create_tumor_visualization(tumor_before, res_level)
+            fig_before = create_tumor_visualization(tumor_before, cell_resistance)
             st.pyplot(fig_before)
             plt.close(fig_before)
         
         elif show_after:
             st.markdown("<h4 style='text-align: center;'>🟢 After Treatment</h4>", unsafe_allow_html=True)
-            res_level = current_day_data["Resist_A"]
-            fig_after = create_tumor_visualization(current_day_data["Tumor Size"], res_level)
+            fig_after = create_tumor_visualization(current_day_data["Tumor Size"], cell_resistance)
             st.pyplot(fig_after)
             plt.close(fig_after)
         

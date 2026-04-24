@@ -28,6 +28,19 @@ class PatientAnalyzer:
         if data is not None:
             self.df = data
         return self.get_strategic_profile()
+    
+    def get_cell_resistance_data(self):
+        """Returns individual cell resistance levels from tumor cells."""
+        # Filter for cancer cells only
+        cancer_subset = self.df[self.df['Disease_Status'] == 'Tumor']
+        
+        if cancer_subset.empty:
+            return []
+        
+        # Return resistance levels (Gene_D_Therapy) for each tumor cell
+        # Normalize to 0-15 scale for consistency with max_res_a
+        resistance_values = cancer_subset['Gene_D_Therapy'].values.tolist()
+        return resistance_values
 
 # Example of how to run it:
 if __name__ == "__main__":
