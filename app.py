@@ -7,39 +7,73 @@ from environment import CancerSimulation
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import os
+import time
 
 # --- HELPER FUNCTION: TUMOR VISUALIZATION ---
-def create_tumor_visualization(tumor_size, title=""):
-    """Create a dark-mode tumor visualization with microscopic nodes"""
-    fig, ax = plt.subplots(figsize=(8, 6), facecolor='#0E1117')
+def create_tumor_visualization(tumor_size, res_level, max_res=15.0):
+    """
+    High-performance tumor cell visualization.
+    Each dot = 1 tumor cell. Color gradient based on resistance (Blue -> Red).
+    """
+    # 1. Initialize persistent cell coordinate pool in session state
+    # This ensures coordinates don't change when switching days (the "jelly" effect)
+    if 'cell_coordinates' not in st.session_state:
+        # Create a large pool of random cell positions (up to 20,000 cells)
+        st.session_state.cell_coordinates = np.random.rand(20000, 2)
+    
+    # 2. Get exact number of cells to display
+    num_cells = int(min(len(st.session_state.cell_coordinates), max(1, tumor_size)))
+    
+    # Use the first N cells from our persistent pool
+    cell_coords = st.session_state.cell_coordinates[:num_cells]
+    
+    # 3. Create color gradient based on resistance level
+    # Normalize resistance: 0 is blue, 1 is red
+    norm_res = min(1.0, max(0.0, res_level / max_res))
+    
+    # Create color array for each cell (gradient from blue to red)
+    colors = np.zeros((num_cells, 3))
+    colors[:, 0] = norm_res              # Red channel increases with resistance
+    colors[:, 1] = 0.15                 # Green stays low
+    colors[:, 2] = 1.0 - norm_res       # Blue channel decreases with resistance
+    
+    # 4. Render the tumor visualization
+    fig, ax = plt.subplots(figsize=(8, 8), facecolor='#0E1117', dpi=80)
     ax.set_facecolor('#161B22')
     
-    # Calculate number of tumor nodes based on size
-    # Scale: higher tumor size = more dots
-    num_tumors = max(10, int(tumor_size / 100))
-    num_tumors = min(200, num_tumors)  # Cap at 200 for visibility
+    # Plot each cell as a small dot
+    ax.scatter(
+        cell_coords[:, 0],
+        cell_coords[:, 1],
+        s=8,  # Small dots for individual cells
+        c=colors,
+        alpha=0.85,
+        edgecolors='none'
+    )
     
-    # Generate random positions for tumor nodes
-    np.random.seed(hash(title) % 2**32)  # Consistent positioning
-    x_positions = np.random.uniform(0.1, 0.9, num_tumors)
-    y_positions = np.random.uniform(0.1, 0.9, num_tumors)
-    
-    # Vary dot sizes for more realistic tumor appearance
-    sizes = np.random.uniform(20, 150, num_tumors)
-    
-    # Create gradient effect with different colors
-    scatter = ax.scatter(x_positions, y_positions, s=sizes, 
-                        c=np.random.uniform(0.3, 1, num_tumors), 
-                        cmap='Reds', alpha=0.7, edgecolors='#FF6B6B', linewidth=0.5)
-    
+    # Style the plot
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
+    ax.aspect('equal')
     ax.axis('off')
     
-    # Add title with tumor count
-    fig.text(0.5, 0.95, title, ha='center', fontsize=14, color='#C9D1D9', weight='bold')
-    fig.text(0.5, 0.02, f"Estimated Tumor Cells: {num_tumors * 100}", 
-            ha='center', fontsize=10, color='#8B949E', style='italic')
+    # Add info text
+    title_text = f"Tumor Cells: {num_cells:,} | Resistance: {norm_res*100:.0f}%"
+    fig.text(0.5, 0.95, title_text, ha='center', fontsize=12, 
+             color='#C9D1D9', weight='bold')
+    
+    # Add resistance status indicator
+    if norm_res > 0.7:
+        status = "⚠️ HIGH RESISTANCE - AGGRESSIVE TREATMENT NEEDED"
+        color = '#FF4444'
+    elif norm_res > 0.4:
+        status = "⚡ MODERATE RESISTANCE - MONITOR CLOSELY"
+        color = '#FFA500'
+    else:
+        status = "✓ LOW RESISTANCE - TREATMENT EFFECTIVE"
+        color = '#4CAF50'
+    
+    fig.text(0.5, 0.02, status, ha='center', fontsize=10, color=color, weight='bold')
     
     return fig
 
@@ -200,34 +234,33 @@ if uploaded_file is not None:
             vis_col1, vis_col2 = st.columns(2)
             
             # Estimate tumor size before drug (slightly larger)
-            tumor_before = current_day_data["Tumor Size"] * 1.15
+            tumor_before = int(current_day_data["Tumor Size"] * 1.15)
+            res_level = current_day_data["Resist_A"]
             
             with vis_col1:
                 st.markdown("<h4 style='text-align: center;'>🔴 Before Treatment</h4>", unsafe_allow_html=True)
-                fig_before = create_tumor_visualization(tumor_before, 
-                    f"Day {current_day_data['Day']} - Before {current_day_data['Action']}")
+                fig_before = create_tumor_visualization(tumor_before, res_level)
                 st.pyplot(fig_before)
                 plt.close(fig_before)
             
             with vis_col2:
                 st.markdown("<h4 style='text-align: center;'>🟢 After Treatment</h4>", unsafe_allow_html=True)
-                fig_after = create_tumor_visualization(current_day_data["Tumor Size"], 
-                    f"Day {current_day_data['Day']} - After {current_day_data['Action']}")
+                fig_after = create_tumor_visualization(current_day_data["Tumor Size"], res_level)
                 st.pyplot(fig_after)
                 plt.close(fig_after)
         
         elif show_before:
             st.markdown("<h4 style='text-align: center;'>🔴 Before Treatment</h4>", unsafe_allow_html=True)
-            tumor_before = current_day_data["Tumor Size"] * 1.15
-            fig_before = create_tumor_visualization(tumor_before, 
-                f"Day {current_day_data['Day']} - Before {current_day_data['Action']}")
+            tumor_before = int(current_day_data["Tumor Size"] * 1.15)
+            res_level = current_day_data["Resist_A"]
+            fig_before = create_tumor_visualization(tumor_before, res_level)
             st.pyplot(fig_before)
             plt.close(fig_before)
         
         elif show_after:
             st.markdown("<h4 style='text-align: center;'>🟢 After Treatment</h4>", unsafe_allow_html=True)
-            fig_after = create_tumor_visualization(current_day_data["Tumor Size"], 
-                f"Day {current_day_data['Day']} - After {current_day_data['Action']}")
+            res_level = current_day_data["Resist_A"]
+            fig_after = create_tumor_visualization(current_day_data["Tumor Size"], res_level)
             st.pyplot(fig_after)
             plt.close(fig_after)
         
