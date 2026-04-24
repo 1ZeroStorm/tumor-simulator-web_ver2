@@ -47,28 +47,22 @@ def create_tumor_visualization(tumor_size, res_level_or_list, max_res=15.0):
     # 4. Create color gradient based on individual cell resistance levels
     norm_resistances = np.clip(cell_resistances / max_res, 0, 1)
     
-    # Use matplotlib colormap for smooth gradient: Yellow (low) -> Orange -> Red (high)
-    # This creates a linear palette that works on any background
-    from matplotlib.colors import Normalize
-    from matplotlib.cm import ScalarMappable
-    
-    cmap = plt.cm.get_cmap('YlOrRd')
-    norm = Normalize(vmin=0, vmax=1)
-    sm = ScalarMappable(norm=norm, cmap=cmap)
-    colors = sm.to_rgba(norm_resistances)[:, :3]  # Get RGB values, drop alpha
-    
     # 5. Render the tumor visualization
     fig, ax = plt.subplots(figsize=(8, 8), facecolor='#0E1117', dpi=80)
     ax.set_facecolor('#161B22')
     
     # Plot each cell as a small dot with the gradient colors
-    ax.scatter(
+    # Pass the normalized resistance values and let matplotlib apply the colormap
+    scatter = ax.scatter(
         cell_coords[:, 0],
         cell_coords[:, 1],
         s=12,  # Slightly larger dots for better color visibility
-        c=colors,
+        c=norm_resistances,  # Pass normalized values directly
+        cmap='YlOrRd',  # Yellow-Orange-Red gradient
         alpha=0.95,  # Higher opacity for better color contrast
-        edgecolors='none'
+        edgecolors='none',
+        vmin=0,
+        vmax=1
     )
     
     # Style the plot
