@@ -208,6 +208,7 @@ if uploaded_file is not None:
             if st.button("◀ PREV", key="prev_day"):
                 if st.session_state.current_day_view > 0:
                     st.session_state.current_day_view -= 1
+                    st.rerun()
         
         with nav_col3:
             st.markdown(f"<div style='text-align: center; padding: 10px;'><h3>📅 Day {st.session_state.current_day_view + 1}</h3></div>", 
@@ -217,17 +218,45 @@ if uploaded_file is not None:
             if st.button("NEXT ▶", key="next_day"):
                 if st.session_state.current_day_view < len(history) - 1:
                     st.session_state.current_day_view += 1
+                    st.rerun()
         
-        # Before/After Toggle
+        # Get current day data
+        current_idx = st.session_state.current_day_view
+        current_day_data = history[current_idx]
+        res_level = current_day_data["Resist_A"]
+        tumor_size = current_day_data["Tumor Size"]
+        
+        # Smooth Animation: "Bloop" effect for tumor growth/shrinkage
+        st.markdown("---")
+        animation_placeholder = st.empty()
+        with animation_placeholder.container():
+            # Animate from previous day to current day
+            if current_idx > 0:
+                prev_size = history[current_idx - 1]["Tumor Size"]
+            else:
+                prev_size = tumor_size
+            
+            # Smooth transition over 5 frames
+            steps = 5
+            for frame in range(steps + 1):
+                # Linear interpolation between previous and current size
+                interpolated_size = int(prev_size + (tumor_size - prev_size) * (frame / steps))
+                
+                # Create figure for this frame
+                fig = create_tumor_visualization(interpolated_size, res_level)
+                animation_placeholder.pyplot(fig)
+                plt.close(fig)
+                
+                # Small delay between frames for smooth animation
+                if frame < steps:
+                    time.sleep(0.08)
+        
+        st.markdown("---")
         toggle_col1, toggle_col2 = st.columns([1, 1])
         with toggle_col1:
             show_before = st.toggle("🔴 Before Drug Application", value=True, key="before_toggle")
         with toggle_col2:
             show_after = st.toggle("🟢 After Drug Application", value=True, key="after_toggle")
-        
-        # Get current day data
-        current_idx = st.session_state.current_day_view
-        current_day_data = history[current_idx]
         
         # Display tumor visualizations
         if show_before and show_after:
