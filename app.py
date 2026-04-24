@@ -9,24 +9,23 @@ import plotly.graph_objects as go
 import os
 
 # --- HELPER FUNCTION: TUMOR VISUALIZATION ---
-def create_tumor_visualization(tumor_size, res_level_or_list, max_res=15.0):
+def create_tumor_visualization(tumor_size, res_level, max_res=15.0):
+    """
+    Fixed color mapping for dots and high-performance Scattergl rendering.
+    """
     if 'cell_coordinates' not in st.session_state:
         st.session_state.cell_coordinates = np.random.rand(20000, 2)
 
     num_cells = int(min(len(st.session_state.cell_coordinates), max(1, tumor_size)))
     cell_coords = st.session_state.cell_coordinates[:num_cells].copy()
 
-    if isinstance(res_level_or_list, (list, np.ndarray)):
-        cell_resistances = np.array(res_level_or_list[:num_cells])
-        if len(cell_resistances) < num_cells:
-            avg_res = np.mean(cell_resistances) if len(cell_resistances) > 0 else max_res / 2
-            cell_resistances = np.pad(cell_resistances, (0, num_cells - len(cell_resistances)), constant_values=avg_res)
-        avg_resistance = np.mean(cell_resistances)
-    else:
-        cell_resistances = np.full(num_cells, res_level_or_list)
-        avg_resistance = res_level_or_list
-
-    norm_resistances = np.clip(cell_resistances / max_res, 0, 1)
+    # Create a simple color array based on the resistance provided
+    # Standardizing to a float between 0 and 1 for the colorscale
+    res_val = float(res_level)
+    norm_res = np.clip(res_val / max_res, 0, 1)
+    
+    # Generate an array of the same value for all points to satisfy the colorscale mapping
+    colors = np.full(num_cells, norm_res)
 
     fig = go.Figure(
         data=[
@@ -35,15 +34,18 @@ def create_tumor_visualization(tumor_size, res_level_or_list, max_res=15.0):
                 y=cell_coords[:, 1],
                 mode='markers',
                 marker=dict(
-                    size=6,
-                    color=norm_resistances,
-                    colorscale='YlOrRd',
+                    size=5,
+                    color=colors,
+                    colorscale='YlOrRd', # Valid Plotly Colorscale
                     cmin=0,
                     cmax=1,
                     showscale=True,
-                    colorbar=dict(title='Resistance', thickness=12, len=0.65, y=0.5, tickfont=dict(color='#C9D1D9')),
-                    opacity=0.85,
-                    line=dict(width=0)
+                    colorbar=dict(
+                        title='Resistance', 
+                        thickness=10, 
+                        tickfont=dict(color='#888888')
+                    ),
+                    opacity=0.8
                 ),
                 hovertemplate='Resistance: %{marker.color:.2f}<extra></extra>'
             )
@@ -54,11 +56,14 @@ def create_tumor_visualization(tumor_size, res_level_or_list, max_res=15.0):
         template=None,
         paper_bgcolor='#0E1117',
         plot_bgcolor='#161B22',
-        margin=dict(l=10, r=10, t=50, b=10),
-        xaxis=dict(visible=False, range=[0, 1]),
-        yaxis=dict(visible=False, range=[0, 1], scaleanchor='x'),
-        title=dict(text=f'Tumor Cells: {num_cells:,} | Avg Resistance: {avg_resistance:.1f}', x=0.5, font=dict(color='#C9D1D9', size=14)),
-        font=dict(color='#C9D1D9'),
+        margin=dict(l=0, r=0, t=30, b=0),
+        xaxis=dict(visible=False),
+        yaxis=dict(visible=False, scaleanchor='x'),
+        title=dict(
+            text=f"Population: {num_cells:,}", 
+            x=0.5, 
+            font=dict(color='#888888', size=14)
+        ),
     )
 
     return fig
@@ -82,7 +87,7 @@ def load_model():
 st.title("🛡️ OncoSteer")
 st.markdown("### Steering tumor evolution toward therapeutic vulnerability")
 
-# --- SIDEBAR: DATA SELECTION ---
+# --- SIDEBAR ---
 st.sidebar.header("Patient Data Input")
 data_mode = st.sidebar.radio("Select Data Source:", ["Upload CSV", "Use Default Synthetic Data"])
 
@@ -91,37 +96,24 @@ current_data_source = None
 
 if data_mode == "Upload CSV":
     uploaded_file = st.sidebar.file_uploader("Upload Proteomic CSV", type=["csv"])
-    if uploaded_file:
-        current_data_source = uploaded_file.name
+    if uploaded_file: current_data_source = uploaded_file.name
 else:
     if os.path.exists(DEFAULT_DATA_PATH):
         uploaded_file = DEFAULT_DATA_PATH
         current_data_source = "default_synthetic_data"
-    else:
-        st.sidebar.error(f"Default data file not found.")
 
-# Initialize session state
 if 'treatment_history' not in st.session_state:
     st.session_state.treatment_history = None
 if 'current_day_view' not in st.session_state:
     st.session_state.current_day_view = 0
-if 'last_loaded_file' not in st.session_state:
-    st.session_state.last_loaded_file = None
 
 if uploaded_file is not None:
-    if current_data_source != st.session_state.last_loaded_file:
-        st.session_state.treatment_history = None
-        st.session_state.current_day_view = 0
-        st.session_state.last_loaded_file = current_data_source
-
     data = pd.read_csv(uploaded_file)
     model = load_model()
     
     try:
         analyzer = PatientAnalyzer(df=data)
         profile = analyzer.get_patient_profile(data)
-        st.session_state.cell_resistance_data = analyzer.get_cell_resistance_data()
-        st.session_state.patient_profile = profile
     except Exception as e:
         st.error(f"Error: {e}")
         st.stop()
@@ -132,115 +124,101 @@ if uploaded_file is not None:
             obs, _ = env.reset()
             history = []
             
-            # Initial state tracking for the "Before" part of Day 1
-            current_size = obs[0]
-            current_res_a = obs[1]
-            current_res_b = obs[2]
+            # Initial states
+            curr_sz, curr_ra, curr_rb = obs[0], obs[1], obs[2]
             
             for day in range(1, 31):
-                # Before Drug Application
-                day_entry = {
+                # 1. Before State (Captures duplication/growth from previous day)
+                history.append({
                     "Day": day,
-                    "Action": "",
                     "Status": "Before Drug",
-                    "Tumor Size": int(current_size),
-                    "Resist A": round(float(current_res_a), 2),
-                    "Resist B": round(float(current_res_b), 2)
-                }
+                    "Action": "—",
+                    "Tumor Size": int(curr_sz),
+                    "Resist A": float(curr_ra),
+                    "Resist B": float(curr_rb)
+                })
                 
-                # Predict and Step
+                # 2. Apply Drug
                 action, _ = model.predict(obs, deterministic=True)
-                action_int = int(action.item())
-                action_names = {0: "Rest", 1: "Drug A", 2: "Drug B"}
+                act_int = int(action.item())
+                act_map = {0: "Rest", 1: "Drug A", 2: "Drug B"}
                 
-                obs, reward, terminated, truncated, info = env.step(action_int)
+                obs, reward, terminated, truncated, info = env.step(act_int)
                 
-                # After Drug Application
-                current_size = obs[0]
-                current_res_a = obs[1]
-                current_res_b = obs[2]
+                # Update states for "After" and next "Before"
+                curr_sz, curr_ra, curr_rb = obs[0], obs[1], obs[2]
                 
-                after_entry = {
+                history.append({
                     "Day": day,
-                    "Action": action_names.get(action_int, "N/A"),
-                    "Status": f"After {action_names.get(action_int, 'N/A')}",
-                    "Tumor Size": int(current_size),
-                    "Resist A": round(float(current_res_a), 2),
-                    "Resist B": round(float(current_res_b), 2)
-                }
+                    "Status": f"After {act_map[act_int]}",
+                    "Action": act_map[act_int],
+                    "Tumor Size": int(curr_sz),
+                    "Resist A": float(curr_ra),
+                    "Resist B": float(curr_rb)
+                })
                 
-                history.append(day_entry)
-                history.append(after_entry)
-                
-                if current_size <= 0 or terminated:
-                    break
+                if curr_sz <= 0 or terminated: break
             
             st.session_state.treatment_history = history
 
     if st.session_state.treatment_history:
-        history = st.session_state.treatment_history
-        df_hist = pd.DataFrame(history)
+        df_hist = pd.DataFrame(st.session_state.treatment_history)
 
-        # Visualizations
+        # --- VISUALIZATION SECTION ---
         st.markdown("---")
-        st.subheader("🔬 Microscopic Tumor Evolution")
+        day_to_show = st.slider("Select Day to Visualize", 1, int(df_hist['Day'].max()), 1)
         
-        # Navigation
-        max_days = df_hist['Day'].max()
-        nav_col1, nav_col2, nav_col3 = st.columns([1, 2, 1])
-        with nav_col1:
-            if st.button("◀ PREV") and st.session_state.current_day_view > 0:
-                st.session_state.current_day_view -= 1
-                st.rerun()
-        with nav_col2:
-            st.markdown(f"<h3 style='text-align: center;'>📅 Day {st.session_state.current_day_view + 1}</h3>", unsafe_allow_html=True)
-        with nav_col3:
-            if st.button("NEXT ▶") and st.session_state.current_day_view < max_days - 1:
-                st.session_state.current_day_view += 1
-                st.rerun()
+        day_data = df_hist[df_hist['Day'] == day_to_show]
+        b_row = day_data[day_data['Status'] == "Before Drug"].iloc[0]
+        a_row = day_data[day_data['Status'].str.contains("After")].iloc[0]
 
-        # Visualization for specific day view
-        day_data = df_hist[df_hist['Day'] == (st.session_state.current_day_view + 1)]
-        before_row = day_data[day_data['Status'] == "Before Drug"].iloc[0]
-        after_row = day_data[day_data['Status'].str.contains("After")].iloc[0]
+        v_col1, v_col2 = st.columns(2)
+        with v_col1:
+            st.markdown("<p style='text-align:center; color:#888888;'>Before Treatment</p>", unsafe_allow_html=True)
+            st.plotly_chart(create_tumor_visualization(b_row["Tumor Size"], b_row["Resist A"]), use_container_width=True)
+        with v_col2:
+            st.markdown(f"<p style='text-align:center; color:#888888;'>After {a_row['Action']}</p>", unsafe_allow_html=True)
+            st.plotly_chart(create_tumor_visualization(a_row["Tumor Size"], a_row["Resist A"]), use_container_width=True)
 
-        vis_col1, vis_col2 = st.columns(2)
-        with vis_col1:
-            st.markdown("<h4 style='text-align: center;'>🔴 Before Treatment</h4>", unsafe_allow_html=True)
-            st.plotly_chart(create_tumor_visualization(before_row["Tumor Size"], before_row["Resist A"]), use_container_width=True)
-        with vis_col2:
-            st.markdown("<h4 style='text-align: center;'>🟢 After Treatment</h4>", unsafe_allow_html=True)
-            st.plotly_chart(create_tumor_visualization(after_row["Tumor Size"], after_row["Resist A"]), use_container_width=True)
-
-        # The Requested Table
+        # --- LOG TABLE ---
         st.markdown("---")
-        st.subheader("📊 Detailed Treatment & Evolution Log")
+        st.subheader("📊 Treatment & Evolution Log")
         
-        # Applying some styling to differentiate rows
-        def style_rows(row):
-            if "Before" in row["Status"]:
-                return ['background-color: #1b212c'] * len(row)
-            return [''] * len(row)
+        # Formatting Resist A and B to 2 decimal places
+        formatted_df = df_hist.copy()
+        formatted_df["Resist A"] = formatted_df["Resist A"].map(lambda x: f"{x:.2f}")
+        formatted_df["Resist B"] = formatted_df["Resist B"].map(lambda x: f"{x:.2f}")
+        
+        st.dataframe(formatted_df, use_container_width=True, hide_index=True)
 
-        st.dataframe(df_hist.style.apply(style_rows, axis=1), use_container_width=True, hide_index=True)
-
-        # Bar Chart Comparison
+        # --- UPDATED CHART ---
         st.markdown("---")
         st.subheader("📈 Tumor Size Dynamics")
-        fig, ax = plt.subplots(figsize=(12, 5), facecolor='#0E1117')
+        fig, ax = plt.subplots(figsize=(10, 4), facecolor='#0E1117')
         ax.set_facecolor('#161B22')
         
-        before_vals = df_hist[df_hist['Status'] == "Before Drug"]
-        after_vals = df_hist[df_hist['Status'].str.contains("After")]
+        days = df_hist[df_hist['Status'] == "Before Drug"]['Day']
+        b_vals = df_hist[df_hist['Status'] == "Before Drug"]['Tumor Size']
+        a_vals = df_hist[df_hist['Status'].str.contains("After")]['Tumor Size']
         
-        x = np.arange(len(before_vals))
-        ax.bar(x - 0.2, before_vals['Tumor Size'], 0.4, label='Before Drug', color='#E74C3C')
-        ax.bar(x + 0.2, after_vals['Tumor Size'], 0.4, label='After Drug', color='#2ECC71')
+        x = np.arange(len(days))
+        ax.bar(x - 0.2, b_vals, 0.4, label='Before Drug', color='#E74C3C', alpha=0.6)
+        ax.bar(x + 0.2, a_vals, 0.4, label='After Drug', color='#2ECC71', alpha=0.8)
         
+        # Grey Labels and Axis Setup
+        ax.set_xlabel('Timeline (Treatment Days)', color='#888888', fontsize=10)
+        ax.set_ylabel('Cell Count (Tumor Size)', color='#888888', fontsize=10)
         ax.set_xticks(x)
-        ax.set_xticklabels(before_vals['Day'], color='#C9D1D9')
-        ax.legend()
+        ax.set_xticklabels(days, color='#888888')
+        ax.tick_params(axis='y', labelcolor='#888888')
+        
+        # Removing spines for a cleaner look
+        for spine in ax.spines.values():
+            spine.set_edgecolor('#30363D')
+
+        ax.legend(facecolor='#161B22', edgecolor='#30363D', labelcolor='#888888')
+        plt.tight_layout()
         st.pyplot(fig)
 
 else:
-    st.warning("Please provide data to start.")
+    st.info("Select a data source in the sidebar to begin.")
