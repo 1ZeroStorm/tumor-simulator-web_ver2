@@ -254,7 +254,7 @@ if uploaded_file is not None:
         # Tumor display
         st.markdown("---")
         fig = create_tumor_visualization(tumor_size, cell_resistance)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True, key="tumor_plot_main")
         
         st.markdown("---")
         toggle_col1, toggle_col2 = st.columns([1, 1])
@@ -273,23 +273,23 @@ if uploaded_file is not None:
             with vis_col1:
                 st.markdown("<h4 style='text-align: center;'>🔴 Before Treatment</h4>", unsafe_allow_html=True)
                 fig_before = create_tumor_visualization(tumor_before, cell_resistance)
-                st.plotly_chart(fig_before, use_container_width=True)
+                st.plotly_chart(fig_before, use_container_width=True, key="tumor_plot_before")
             
             with vis_col2:
                 st.markdown("<h4 style='text-align: center;'>🟢 After Treatment</h4>", unsafe_allow_html=True)
                 fig_after = create_tumor_visualization(current_day_data["Tumor Size"], cell_resistance)
-                st.plotly_chart(fig_after, use_container_width=True)
+                st.plotly_chart(fig_after, use_container_width=True, key="tumor_plot_after")
         
         elif show_before:
             st.markdown("<h4 style='text-align: center;'>🔴 Before Treatment</h4>", unsafe_allow_html=True)
             tumor_before = int(current_day_data["Tumor Size"] * 1.15)
             fig_before = create_tumor_visualization(tumor_before, cell_resistance)
-            st.plotly_chart(fig_before, use_container_width=True)
+            st.plotly_chart(fig_before, use_container_width=True, key="tumor_plot_before")
         
         elif show_after:
             st.markdown("<h4 style='text-align: center;'>🟢 After Treatment</h4>", unsafe_allow_html=True)
             fig_after = create_tumor_visualization(current_day_data["Tumor Size"], cell_resistance)
-            st.plotly_chart(fig_after, use_container_width=True)
+            st.plotly_chart(fig_after, use_container_width=True, key="tumor_plot_after")
         
         # Display current day details
         st.markdown("---")
