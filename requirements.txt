@@ -1,7 +1,6 @@
-streamlit==1.32.0
-pandas==2.2.0
-numpy==1.26.4
-gymnasium==0.29.1
-stable-baselines3==2.2.1
-torch==2.2.0
-matplotlib==3.8.3
+streamlit
+pandas
+numpy
+gymnasium
+stable-baselines3
+matplotlib
