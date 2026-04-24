@@ -5,30 +5,20 @@ from stable_baselines3 import PPO
 from analyzer import PatientAnalyzer
 from environment import CancerSimulation
 import matplotlib.pyplot as plt
-import matplotlib.patches as patches
 import plotly.graph_objects as go
 import os
-import time
 
 # --- HELPER FUNCTION: TUMOR VISUALIZATION ---
-def create_tumor_visualization(tumor_size, res_level_or_list, max_res=15.0, jelly_intensity=0.0, jelly_phase=0):
+def create_tumor_visualization(tumor_size, res_level_or_list, max_res=15.0):
     """
-    High-performance tumor cell visualization.
-    Each dot = 1 tumor cell. Color gradient based on resistance.
-    
-    res_level_or_list: Either a single float (average resistance) or list of individual resistances
+    High-performance tumor cell visualization using Plotly Scattergl.
     """
-    # 1. Initialize persistent cell coordinate pool in session state
     if 'cell_coordinates' not in st.session_state:
         st.session_state.cell_coordinates = np.random.rand(20000, 2)
 
-    # 2. Get exact number of cells to display
     num_cells = int(min(len(st.session_state.cell_coordinates), max(1, tumor_size)))
-
-    # Use the first N cells from our persistent pool
     cell_coords = st.session_state.cell_coordinates[:num_cells].copy()
 
-    # 3. Determine resistance values for each cell
     if isinstance(res_level_or_list, (list, np.ndarray)):
         cell_resistances = np.array(res_level_or_list[:num_cells])
         if len(cell_resistances) < num_cells:
@@ -54,7 +44,7 @@ def create_tumor_visualization(tumor_size, res_level_or_list, max_res=15.0, jell
                     cmin=0,
                     cmax=1,
                     showscale=True,
-                    colorbar=dict(title='Resistance', thickness=12, len=0.65, y=0.5, ticks='outside', tickfont=dict(color='#C9D1D9')),
+                    colorbar=dict(title='Resistance', thickness=12, len=0.65, y=0.5, tickfont=dict(color='#C9D1D9')),
                     opacity=0.85,
                     line=dict(width=0)
                 ),
@@ -78,302 +68,170 @@ def create_tumor_visualization(tumor_size, res_level_or_list, max_res=15.0, jell
 
 # --- CONFIGURATION ---
 st.set_page_config(
-    page_title="The Peacekeeper: AI Immunotherapy",
+    page_title="OncoSteer: Evolutionary AI",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-MODEL_PATH = "peacekeeper_final_azure" # Do not add .zip here
+MODEL_PATH = "peacekeeper_final_azure" 
+DEFAULT_DATA_PATH = "data/Gene_Expression_Analysis_and_Disease_Relationship_Synthetic.csv"
 
 @st.cache_resource
 def load_model():
     if os.path.exists(f"{MODEL_PATH}.zip"):
         return PPO.load(MODEL_PATH)
     else:
-        st.error(f"Model file {MODEL_PATH}.zip not found in repository!")
+        st.error(f"Model file {MODEL_PATH}.zip not found!")
         return None
 
-st.title("🛡️ The Peacekeeper")
-st.markdown("### Digital Immunotherapy & Evolutionary Trap Optimizer")
-st.info("Upload patient proteomic data to generate a personalized, safety-constrained treatment plan.")
+st.title("🛡️ OncoSteer")
+st.markdown("### Steering tumor evolution toward therapeutic vulnerability")
+st.info("Upload patient proteomic data or use the default synthetic dataset to generate a personalized treatment plan.")
 
-# --- SIDEBAR: PATIENT DATA ---
+# --- SIDEBAR: DATA SELECTION ---
 st.sidebar.header("Patient Data Input")
-uploaded_file = st.sidebar.file_uploader("Upload Proteomic CSV", type=["csv"])
+data_mode = st.sidebar.radio("Select Data Source:", ["Upload CSV", "Use Default Synthetic Data"])
 
-# Initialize session state variables
-if 'uploaded_data' not in st.session_state:
-    st.session_state.uploaded_data = None
-if 'patient_profile' not in st.session_state:
-    st.session_state.patient_profile = None
+uploaded_file = None
+if data_mode == "Upload CSV":
+    uploaded_file = st.sidebar.file_uploader("Upload Proteomic CSV", type=["csv"])
+    current_data_source = uploaded_file.name if uploaded_file else None
+else:
+    if os.path.exists(DEFAULT_DATA_PATH):
+        uploaded_file = DEFAULT_DATA_PATH
+        current_data_source = "default_synthetic_data"
+    else:
+        st.sidebar.error("Default data file not found at path.")
+
+# Initialize session state
 if 'treatment_history' not in st.session_state:
     st.session_state.treatment_history = None
 if 'current_day_view' not in st.session_state:
     st.session_state.current_day_view = 0
-if 'current_file_name' not in st.session_state:
-    st.session_state.current_file_name = None
-if 'cell_resistance_data' not in st.session_state:
-    st.session_state.cell_resistance_data = None
+if 'last_loaded_file' not in st.session_state:
+    st.session_state.last_loaded_file = None
 
+# Process Data
 if uploaded_file is not None:
-    # Check if a new file was uploaded (different from the current one)
-    if uploaded_file.name != st.session_state.current_file_name:
-        # Reset treatment results when a new file is uploaded
+    # Reset if source changed
+    if current_data_source != st.session_state.last_loaded_file:
         st.session_state.treatment_history = None
         st.session_state.current_day_view = 0
-        st.session_state.current_file_name = uploaded_file.name
-    
-    # Store uploaded data in session state
+        st.session_state.last_loaded_file = current_data_source
+
     data = pd.read_csv(uploaded_file)
-    st.session_state.uploaded_data = data
-    
     model = load_model()
     
     try:
         analyzer = PatientAnalyzer(df=data)
+        with st.spinner("Analyzing Proteomic Signatures..."):
+            profile = analyzer.get_patient_profile(data)
+            cell_resistance_data = analyzer.get_cell_resistance_data()
+            st.session_state.patient_profile = profile
+            st.session_state.cell_resistance_data = cell_resistance_data
     except Exception as e:
         st.error(f"Error initializing analyzer: {e}")
         st.stop()
     
-    # Step 1: Diagnostic Phase (Neural Network)
-    with st.spinner("Analyzing Proteomic Signatures..."):
-        profile = analyzer.get_patient_profile(data)
-        cell_resistance = analyzer.get_cell_resistance_data()
-        st.session_state.patient_profile = profile
-        st.session_state.cell_resistance_data = cell_resistance
-    
-    # --- DISPLAY DIAGNOSTIC SUMMARY ---
+    # Display Diagnostic Summary
     col1, col2, col3 = st.columns(3)
     col1.metric("Max Resistance (Drug A)", f"{profile['max_res_a']:.2f}")
     col2.metric("Avg Growth Rate", f"{profile['avg_growth']:.2f}%")
     col3.metric("Initial Res_B", "5.00 (Standard)")
 
     if st.button("Generate Optimized Treatment Plan"):
-        # Step 2: Strategy Optimization Phase
         env = CancerSimulation(profile)
         obs, _ = env.reset()
-        
         history = []
-        terminated = False
         day = 1
         
-        # Run simulation for up to 30 days
-        while not terminated and day <= 30:
+        while day <= 30:
+            # Current size before treatment
+            size_before = int(obs[0])
+            
             action, _ = model.predict(obs, deterministic=True)
             obs, reward, terminated, truncated, info = env.step(action)
             
-            # Map action to readable name - clear conditional logic
-            if action == 0:
-                action_name = "Rest (Recovery)"
-            elif action == 1:
-                action_name = "Drug A (Priming)"
-            else:  # action == 2
-                action_name = "Drug B (TRAP)"
+            # Size after treatment
+            size_after = int(obs[0])
             
-            # Get values from state
-            size, res_a, res_b = obs[0], obs[1], obs[2]
-            toxicity = info.get('toxicity', day)
-            
-            # Safety Status Logic
-            if toxicity < 5: status = "🟢 SAFE"
-            elif toxicity < 8: status = "🟡 MONITOR"
-            else: status = "🔴 CRITICAL"
+            action_names = {0: "Rest (Recovery)", 1: "Drug A (Priming)", 2: "Drug B (TRAP)"}
             
             history.append({
                 "Day": day,
-                "Action": action_name,
-                "Tumor Size": int(size),
-                "Resist_A": round(res_a, 2),
-                "Resist_B": round(res_b, 2),
-                "Safety Status": status
+                "Action": action_names[action],
+                "Size Before": size_before,
+                "Size After": size_after,
+                "Tumor Size": size_after, # For backward compatibility
+                "Resist_A": round(obs[1], 2),
+                "Resist_B": round(obs[2], 2),
             })
             
-            if size <= 0:
-                break
+            if size_after <= 0 or terminated: break
             day += 1
         
-        # Store history in session state
         st.session_state.treatment_history = history
-        st.session_state.current_day_view = 0
-    
-    # Display results if history exists
-    if st.session_state.treatment_history is not None:
+
+    # --- RESULTS DISPLAY ---
+    if st.session_state.treatment_history:
         history = st.session_state.treatment_history
-        profile = st.session_state.patient_profile
         
-        # --- RESULTS DISPLAY ---
-        st.success(f"Strategy Optimized: Treatment targets eradication by Day {len(history)}")
-        
-        # === INTERACTIVE TUMOR VISUALIZATION ===
         st.markdown("---")
         st.subheader("🔬 Microscopic Tumor Evolution")
         
-        # Color Legend
-        st.markdown("""
-        <div style='padding: 16px; border-radius: 14px; background-color: #0D1117; color: #C9D1D9; border: 1px solid #30363D;'>
-          <strong>Resistance Level Gradient:</strong>
-          <div style='margin: 12px 0; height: 20px; border-radius: 12px; background: linear-gradient(90deg, #FFFFB2 0%, #FED976 25%, #FD8D3C 50%, #F03B20 75%, #BD0026 100%);'></div>
-          <div style='display: flex; justify-content: space-between; font-size: 0.95rem;'>
-            <span>Low resistance</span>
-            <span>High resistance</span>
-          </div>
-          <div style='margin-top: 10px; font-size: 0.95rem;'>
-            Each dot's color is mapped to resistance level on a continuous scale, from cooler low-resistance tones to warmer high-resistance tones.
-          </div>
-        </div>
-        """, unsafe_allow_html=True)
-
-        st.markdown("<div style='height: 24px;'></div>", unsafe_allow_html=True)
-        
-        # Day Navigation Controls
-        nav_col1, nav_col2, nav_col3, nav_col4, nav_col5 = st.columns([1, 1, 3, 1, 1])
-        
+        # Day Navigation
+        nav_col1, nav_col2, nav_col3 = st.columns([1, 2, 1])
         with nav_col1:
-            if st.button("◀ PREV", key="prev_day"):
-                if st.session_state.current_day_view > 0:
-                    st.session_state.current_day_view -= 1
-                    st.rerun()
-        
+            if st.button("◀ PREV") and st.session_state.current_day_view > 0:
+                st.session_state.current_day_view -= 1
+                st.rerun()
+        with nav_col2:
+            st.markdown(f"<h3 style='text-align: center;'>📅 Day {st.session_state.current_day_view + 1}</h3>", unsafe_allow_html=True)
         with nav_col3:
-            st.markdown(f"<div style='text-align: center; padding: 10px; margin-top: 8px;'><h3>📅 Day {st.session_state.current_day_view + 1}</h3></div>", 
-                       unsafe_allow_html=True)
+            if st.button("NEXT ▶") and st.session_state.current_day_view < len(history) - 1:
+                st.session_state.current_day_view += 1
+                st.rerun()
+
+        curr = history[st.session_state.current_day_view]
         
-        with nav_col5:
-            if st.button("NEXT ▶", key="next_day"):
-                if st.session_state.current_day_view < len(history) - 1:
-                    st.session_state.current_day_view += 1
-                    st.rerun()
-        
-        # Get current day data
-        current_idx = st.session_state.current_day_view
-        current_day_data = history[current_idx]
-        res_level = current_day_data["Resist_A"]
-        tumor_size = current_day_data["Tumor Size"]
-        cell_resistance = st.session_state.cell_resistance_data or res_level
-        
-        # Tumor display
-        st.markdown("---")
-        fig = create_tumor_visualization(tumor_size, cell_resistance)
-        st.plotly_chart(fig, use_container_width=True, key="tumor_plot_main")
-        
-        st.markdown("---")
-        toggle_col1, toggle_col2 = st.columns([1, 1])
-        with toggle_col1:
-            show_before = st.toggle("🔴 Before Drug Application", value=True, key="before_toggle")
-        with toggle_col2:
-            show_after = st.toggle("🟢 After Drug Application", value=True, key="after_toggle")
-        
-        # Display tumor visualizations
-        if show_before and show_after:
-            vis_col1, vis_col2 = st.columns(2)
-            
-            # Estimate tumor size before drug (slightly larger)
-            tumor_before = int(current_day_data["Tumor Size"] * 1.15)
-            
-            with vis_col1:
-                st.markdown("<h4 style='text-align: center;'>🔴 Before Treatment</h4>", unsafe_allow_html=True)
-                fig_before = create_tumor_visualization(tumor_before, cell_resistance)
-                st.plotly_chart(fig_before, use_container_width=True, key="tumor_plot_before")
-            
-            with vis_col2:
-                st.markdown("<h4 style='text-align: center;'>🟢 After Treatment</h4>", unsafe_allow_html=True)
-                fig_after = create_tumor_visualization(current_day_data["Tumor Size"], cell_resistance)
-                st.plotly_chart(fig_after, use_container_width=True, key="tumor_plot_after")
-        
-        elif show_before:
+        # Side-by-Side Visualization
+        vis_col1, vis_col2 = st.columns(2)
+        with vis_col1:
             st.markdown("<h4 style='text-align: center;'>🔴 Before Treatment</h4>", unsafe_allow_html=True)
-            tumor_before = int(current_day_data["Tumor Size"] * 1.15)
-            fig_before = create_tumor_visualization(tumor_before, cell_resistance)
-            st.plotly_chart(fig_before, use_container_width=True, key="tumor_plot_before")
-        
-        elif show_after:
+            st.plotly_chart(create_tumor_visualization(curr["Size Before"], st.session_state.cell_resistance_data), use_container_width=True, key="before")
+        with vis_col2:
             st.markdown("<h4 style='text-align: center;'>🟢 After Treatment</h4>", unsafe_allow_html=True)
-            fig_after = create_tumor_visualization(current_day_data["Tumor Size"], cell_resistance)
-            st.plotly_chart(fig_after, use_container_width=True, key="tumor_plot_after")
-        
-        # Display current day details
-        st.markdown("---")
-        detail_col1, detail_col2, detail_col3, detail_col4 = st.columns(4)
-        
-        with detail_col1:
-            st.metric("Action Taken", current_day_data["Action"], 
-                     delta=None, delta_color="off")
-        with detail_col2:
-            st.metric("Tumor Size", f"{current_day_data['Tumor Size']}", 
-                     delta=None, delta_color="off")
-        with detail_col3:
-            st.metric("Drug A Resistance", f"{current_day_data['Resist_A']:.2f}", 
-                     delta=None, delta_color="off")
-        with detail_col4:
-            st.metric("Drug B Resistance", f"{current_day_data['Resist_B']:.2f}", 
-                     delta=None, delta_color="off")
-        
-        # Display Table
-        st.markdown("---")
-        st.subheader("📊 Full Treatment Timeline")
-        df_history = pd.DataFrame(history)
-        st.dataframe(df_history, use_container_width=True)
-        
-        # --- VISUALIZATION (The "Why") ---
-        st.subheader("📈 Evolutionary Trap Analysis - Treatment Strategy Over Time")
-        fig, ax1 = plt.subplots(figsize=(12, 6), facecolor='#0E1117')
-        ax1.set_facecolor('#161B22')
+            st.plotly_chart(create_tumor_visualization(curr["Size After"], st.session_state.cell_resistance_data), use_container_width=True, key="after")
 
-        # Identify Drug B application days
-        drug_b_days = df_history[df_history['Action'].str.contains('Drug B', na=False)]['Day'].tolist()
+        # --- UPDATED CHART: BEFORE VS AFTER ---
+        st.markdown("---")
+        st.subheader("📈 Evolutionary Impact Analysis")
         
-        # Plot Tumor Size on primary y-axis
-        color = 'tab:red'
-        ax1.set_xlabel('Day', color='#C9D1D9', fontsize=11)
-        ax1.set_ylabel('Tumor Size', color=color, fontsize=11)
-        ax1.plot(df_history['Day'], df_history['Tumor Size'], color=color, linewidth=3, label="Tumor Size", marker='o', markersize=4)
-        ax1.tick_params(axis='y', labelcolor=color)
-        ax1.tick_params(axis='x', labelcolor='#C9D1D9')
-        ax1.grid(True, alpha=0.2, color='#30363D')
-        
-        # Highlight Drug B application areas
-        if drug_b_days:
-            for drug_b_day in drug_b_days:
-                ax1.axvline(x=drug_b_day, color='#FF6B6B', linestyle='--', linewidth=2, alpha=0.6)
-            ax1.axvspan(min(drug_b_days) - 0.5, max(drug_b_days) + 0.5, alpha=0.1, color='#FF6B6B', label='Drug B (TRAP) Applied')
+        df_hist = pd.DataFrame(history)
+        fig, ax = plt.subplots(figsize=(12, 6), facecolor='#0E1117')
+        ax.set_facecolor('#161B22')
 
-        # Plot Resistance levels on secondary y-axis
-        ax2 = ax1.twinx()
-        ax2.set_ylabel('Resistance Levels', color='#C9D1D9', fontsize=11)
-        ax2.plot(df_history['Day'], df_history['Resist_A'], '--', label="Resist A (Priming Target)", 
-                color='#1f77b4', linewidth=2, marker='s', markersize=3)
-        ax2.plot(df_history['Day'], df_history['Resist_B'], ':', label="Resist B (Trap Trigger)", 
-                color='#2ca02c', linewidth=2.5, marker='^', markersize=4)
-        
-        # Add trap threshold line
-        ax2.axhline(y=2.5, color='#FFA500', linestyle='-', linewidth=2, alpha=0.7, label="Trap Threshold (2.5)")
-        ax2.tick_params(axis='y', labelcolor='#C9D1D9')
-        ax2.set_ylim(bottom=0)
-        
-        # Combine legends from both axes
-        lines1, labels1 = ax1.get_legend_handles_labels()
-        lines2, labels2 = ax2.get_legend_handles_labels()
-        ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper left', fontsize=9, facecolor='#161B22', edgecolor='#30363D')
-        
-        ax1.set_title('Strategic Treatment Timeline: Priming → Trap Activation', 
-                     color='#C9D1D9', fontsize=12, weight='bold', pad=15)
-        
-        fig.tight_layout()
+        x = np.arange(len(df_hist))
+        width = 0.35
+
+        ax.bar(x - width/2, df_hist['Size Before'], width, label='Size Before Drug', color='#E74C3C', alpha=0.7)
+        ax.bar(x + width/2, df_hist['Size After'], width, label='Size After Drug', color='#2ECC71', alpha=0.9)
+
+        ax.set_xlabel('Treatment Day', color='#C9D1D9')
+        ax.set_ylabel('Tumor Cell Count', color='#C9D1D9')
+        ax.set_title('Tumor Size Reduction per Day: Before vs. After Dose', color='#C9D1D9', fontsize=14)
+        ax.set_xticks(x)
+        ax.set_xticklabels(df_hist['Day'], color='#C9D1D9')
+        ax.tick_params(axis='y', labelcolor='#C9D1D9')
+        ax.legend(facecolor='#161B22', edgecolor='#30363D', labelcolor='#C9D1D9')
+        ax.grid(axis='y', alpha=0.1)
+
+        plt.tight_layout()
         st.pyplot(fig)
 
-        st.markdown("""
-        **📋 Treatment Strategy Explanation:**
-        
-        🔵 **Phase 1 - Priming (Drug A):** The AI applies Drug A to build up collateral sensitivity. 
-        While Res_A increases, Res_B is driven down toward the trap threshold.
-        
-        🔴 **Phase 2 - Trap Activation (Drug B):** Once Res_B crosses the 2.5 threshold, 
-        the evolutionary trap is sprung! Drug B becomes highly effective (85% kill rate), 
-        rapidly reducing tumor burden while maintaining safety.
-        
-        ⚠️ **Toxicity Management:** The system monitors cumulative toxicity and switches 
-        to rest days when needed to prevent organ damage.
-        """)
+        # Full History Table
+        st.subheader("📊 Full Treatment Timeline")
+        st.dataframe(df_hist, use_container_width=True)
 
 else:
-    st.warning("Please upload a CSV file to begin analysis.")
+    st.warning("Please upload a CSV file or select the default dataset to begin analysis.")
