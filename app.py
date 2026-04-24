@@ -10,9 +10,6 @@ import os
 
 # --- HELPER FUNCTION: TUMOR VISUALIZATION ---
 def create_tumor_visualization(tumor_size, res_level_or_list, max_res=15.0):
-    """
-    High-performance tumor cell visualization using Plotly Scattergl.
-    """
     if 'cell_coordinates' not in st.session_state:
         st.session_state.cell_coordinates = np.random.rand(20000, 2)
 
@@ -80,13 +77,10 @@ DEFAULT_DATA_PATH = "data/Gene_Expression_Analysis_and_Disease_Relationship_Synt
 def load_model():
     if os.path.exists(f"{MODEL_PATH}.zip"):
         return PPO.load(MODEL_PATH)
-    else:
-        # Graceful fallback if model is missing
-        return None
+    return None
 
 st.title("🛡️ OncoSteer")
 st.markdown("### Steering tumor evolution toward therapeutic vulnerability")
-st.info("Upload patient proteomic data or use the default synthetic dataset to generate a personalized treatment plan.")
 
 # --- SIDEBAR: DATA SELECTION ---
 st.sidebar.header("Patient Data Input")
@@ -104,7 +98,7 @@ else:
         uploaded_file = DEFAULT_DATA_PATH
         current_data_source = "default_synthetic_data"
     else:
-        st.sidebar.error(f"Default data file not found at {DEFAULT_DATA_PATH}")
+        st.sidebar.error(f"Default data file not found.")
 
 # Initialize session state
 if 'treatment_history' not in st.session_state:
@@ -114,9 +108,7 @@ if 'current_day_view' not in st.session_state:
 if 'last_loaded_file' not in st.session_state:
     st.session_state.last_loaded_file = None
 
-# Process Data
 if uploaded_file is not None:
-    # Reset if source changed
     if current_data_source != st.session_state.last_loaded_file:
         st.session_state.treatment_history = None
         st.session_state.current_day_view = 0
@@ -127,67 +119,74 @@ if uploaded_file is not None:
     
     try:
         analyzer = PatientAnalyzer(df=data)
-        with st.spinner("Analyzing Proteomic Signatures..."):
-            profile = analyzer.get_patient_profile(data)
-            cell_resistance_data = analyzer.get_cell_resistance_data()
-            st.session_state.patient_profile = profile
-            st.session_state.cell_resistance_data = cell_resistance_data
+        profile = analyzer.get_patient_profile(data)
+        st.session_state.cell_resistance_data = analyzer.get_cell_resistance_data()
+        st.session_state.patient_profile = profile
     except Exception as e:
-        st.error(f"Error initializing analyzer: {e}")
+        st.error(f"Error: {e}")
         st.stop()
-    
-    # Display Diagnostic Summary
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Max Resistance (Drug A)", f"{profile['max_res_a']:.2f}")
-    col2.metric("Avg Growth Rate", f"{profile['avg_growth']:.2f}%")
-    col3.metric("Initial Res_B", "5.00 (Standard)")
 
     if st.button("Generate Optimized Treatment Plan"):
-        if model is None:
-            st.error("Model not found. Please ensure the model file is in the correct directory.")
-        else:
+        if model:
             env = CancerSimulation(profile)
             obs, _ = env.reset()
             history = []
-            day = 1
             
-            while day <= 30:
-                size_before = int(obs[0])
+            # Initial state tracking for the "Before" part of Day 1
+            current_size = obs[0]
+            current_res_a = obs[1]
+            current_res_b = obs[2]
+            
+            for day in range(1, 31):
+                # Before Drug Application
+                day_entry = {
+                    "Day": day,
+                    "Action": "",
+                    "Status": "Before Drug",
+                    "Tumor Size": int(current_size),
+                    "Resist A": round(float(current_res_a), 2),
+                    "Resist B": round(float(current_res_b), 2)
+                }
                 
-                # Predict action
+                # Predict and Step
                 action, _ = model.predict(obs, deterministic=True)
-                
-                # FIX: Ensure action is a standard Python integer
                 action_int = int(action.item())
+                action_names = {0: "Rest", 1: "Drug A", 2: "Drug B"}
                 
                 obs, reward, terminated, truncated, info = env.step(action_int)
-                size_after = int(obs[0])
                 
-                action_names = {0: "Rest (Recovery)", 1: "Drug A (Priming)", 2: "Drug B (TRAP)"}
+                # After Drug Application
+                current_size = obs[0]
+                current_res_a = obs[1]
+                current_res_b = obs[2]
                 
-                history.append({
+                after_entry = {
                     "Day": day,
-                    "Action": action_names.get(action_int, "Unknown"),
-                    "Size Before": size_before,
-                    "Size After": size_after,
-                    "Resist_A": round(float(obs[1]), 2),
-                    "Resist_B": round(float(obs[2]), 2),
-                })
+                    "Action": action_names.get(action_int, "N/A"),
+                    "Status": f"After {action_names.get(action_int, 'N/A')}",
+                    "Tumor Size": int(current_size),
+                    "Resist A": round(float(current_res_a), 2),
+                    "Resist B": round(float(current_res_b), 2)
+                }
                 
-                if size_after <= 0 or terminated: 
+                history.append(day_entry)
+                history.append(after_entry)
+                
+                if current_size <= 0 or terminated:
                     break
-                day += 1
             
             st.session_state.treatment_history = history
 
-    # --- RESULTS DISPLAY ---
     if st.session_state.treatment_history:
         history = st.session_state.treatment_history
-        
+        df_hist = pd.DataFrame(history)
+
+        # Visualizations
         st.markdown("---")
         st.subheader("🔬 Microscopic Tumor Evolution")
         
-        # Day Navigation
+        # Navigation
+        max_days = df_hist['Day'].max()
         nav_col1, nav_col2, nav_col3 = st.columns([1, 2, 1])
         with nav_col1:
             if st.button("◀ PREV") and st.session_state.current_day_view > 0:
@@ -196,50 +195,52 @@ if uploaded_file is not None:
         with nav_col2:
             st.markdown(f"<h3 style='text-align: center;'>📅 Day {st.session_state.current_day_view + 1}</h3>", unsafe_allow_html=True)
         with nav_col3:
-            if st.button("NEXT ▶") and st.session_state.current_day_view < len(history) - 1:
+            if st.button("NEXT ▶") and st.session_state.current_day_view < max_days - 1:
                 st.session_state.current_day_view += 1
                 st.rerun()
 
-        curr = history[st.session_state.current_day_view]
-        
-        # Side-by-Side Visualization
+        # Visualization for specific day view
+        day_data = df_hist[df_hist['Day'] == (st.session_state.current_day_view + 1)]
+        before_row = day_data[day_data['Status'] == "Before Drug"].iloc[0]
+        after_row = day_data[day_data['Status'].str.contains("After")].iloc[0]
+
         vis_col1, vis_col2 = st.columns(2)
         with vis_col1:
             st.markdown("<h4 style='text-align: center;'>🔴 Before Treatment</h4>", unsafe_allow_html=True)
-            st.plotly_chart(create_tumor_visualization(curr["Size Before"], st.session_state.cell_resistance_data), use_container_width=True, key=f"before_{st.session_state.current_day_view}")
+            st.plotly_chart(create_tumor_visualization(before_row["Tumor Size"], before_row["Resist A"]), use_container_width=True)
         with vis_col2:
             st.markdown("<h4 style='text-align: center;'>🟢 After Treatment</h4>", unsafe_allow_html=True)
-            st.plotly_chart(create_tumor_visualization(curr["Size After"], st.session_state.cell_resistance_data), use_container_width=True, key=f"after_{st.session_state.current_day_view}")
+            st.plotly_chart(create_tumor_visualization(after_row["Tumor Size"], after_row["Resist A"]), use_container_width=True)
 
-        # --- CHART: BEFORE VS AFTER ---
+        # The Requested Table
         st.markdown("---")
-        st.subheader("📈 Evolutionary Impact Analysis")
+        st.subheader("📊 Detailed Treatment & Evolution Log")
         
-        df_hist = pd.DataFrame(history)
-        fig, ax = plt.subplots(figsize=(12, 6), facecolor='#0E1117')
+        # Applying some styling to differentiate rows
+        def style_rows(row):
+            if "Before" in row["Status"]:
+                return ['background-color: #1b212c'] * len(row)
+            return [''] * len(row)
+
+        st.dataframe(df_hist.style.apply(style_rows, axis=1), use_container_width=True, hide_index=True)
+
+        # Bar Chart Comparison
+        st.markdown("---")
+        st.subheader("📈 Tumor Size Dynamics")
+        fig, ax = plt.subplots(figsize=(12, 5), facecolor='#0E1117')
         ax.set_facecolor('#161B22')
-
-        x = np.arange(len(df_hist))
-        width = 0.35
-
-        ax.bar(x - width/2, df_hist['Size Before'], width, label='Size Before Drug', color='#E74C3C', alpha=0.7)
-        ax.bar(x + width/2, df_hist['Size After'], width, label='Size After Drug', color='#2ECC71', alpha=0.9)
-
-        ax.set_xlabel('Treatment Day', color='#C9D1D9')
-        ax.set_ylabel('Tumor Cell Count', color='#C9D1D9')
-        ax.set_title('Tumor Size Reduction per Day: Before vs. After Dose', color='#C9D1D9', fontsize=14)
+        
+        before_vals = df_hist[df_hist['Status'] == "Before Drug"]
+        after_vals = df_hist[df_hist['Status'].str.contains("After")]
+        
+        x = np.arange(len(before_vals))
+        ax.bar(x - 0.2, before_vals['Tumor Size'], 0.4, label='Before Drug', color='#E74C3C')
+        ax.bar(x + 0.2, after_vals['Tumor Size'], 0.4, label='After Drug', color='#2ECC71')
+        
         ax.set_xticks(x)
-        ax.set_xticklabels(df_hist['Day'], color='#C9D1D9')
-        ax.tick_params(axis='y', labelcolor='#C9D1D9')
-        ax.legend(facecolor='#161B22', edgecolor='#30363D', labelcolor='#C9D1D9')
-        ax.grid(axis='y', alpha=0.1)
-
-        plt.tight_layout()
+        ax.set_xticklabels(before_vals['Day'], color='#C9D1D9')
+        ax.legend()
         st.pyplot(fig)
 
-        # Full History Table
-        st.subheader("📊 Full Treatment Timeline")
-        st.dataframe(df_hist, use_container_width=True)
-
 else:
-    st.warning("Please upload a CSV file or select the default dataset to begin analysis.")
+    st.warning("Please provide data to start.")
