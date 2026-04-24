@@ -47,11 +47,12 @@ def create_tumor_visualization(tumor_size, res_level_or_list, max_res=15.0):
     # 4. Create color gradient based on individual cell resistance levels
     norm_resistances = np.clip(cell_resistances / max_res, 0, 1)
     
-    # Create color array for each cell with enhanced contrast
+    # Create lighter color gradient: Cyan (low resistance) -> Yellow -> Red (high resistance)
     colors = np.zeros((num_cells, 3))
-    colors[:, 0] = norm_resistances ** 0.7      # Red channel
-    colors[:, 1] = 0.05                         # Green stays very low
-    colors[:, 2] = (1.0 - norm_resistances) ** 0.7  # Blue channel
+    # Cyan to Red gradient with brighter colors
+    colors[:, 0] = norm_resistances ** 0.8      # Red: increases from 0 to 1
+    colors[:, 1] = (1.0 - norm_resistances) ** 0.6  # Green: high for low-mid resistance (cyan/yellow)
+    colors[:, 2] = (1.0 - norm_resistances) ** 0.5  # Blue: high for low resistance (cyan), low for high (red)
     
     # 5. Render the tumor visualization
     fig, ax = plt.subplots(figsize=(8, 8), facecolor='#0E1117', dpi=80)
@@ -74,7 +75,7 @@ def create_tumor_visualization(tumor_size, res_level_or_list, max_res=15.0):
     ax.axis('off')
     
     # Add info text
-    title_text = f"Tumor Cells: {num_cells:,} | Resistance: {avg_resistance:.1f}"
+    title_text = f"Tumor Cells: {num_cells:,} | Average Resistance: {avg_resistance:.1f}"
     fig.text(0.5, 0.95, title_text, ha='center', fontsize=12, 
              color='#C9D1D9', weight='bold')
     
@@ -92,7 +93,20 @@ def create_tumor_visualization(tumor_size, res_level_or_list, max_res=15.0):
     return fig
 
 # --- CONFIGURATION ---
-st.set_page_config(page_title="The Peacekeeper: AI Immunotherapy", layout="wide")
+st.set_page_config(
+    page_title="The Peacekeeper: AI Immunotherapy",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# Force dark theme
+st.markdown("""
+<style>
+    .stApp {
+        background-color: #000000;
+    }
+</style>
+""", unsafe_allow_html=True)
 
 MODEL_PATH = "peacekeeper_final_azure" # Do not add .zip here
 
@@ -218,6 +232,16 @@ if uploaded_file is not None:
         # === INTERACTIVE TUMOR VISUALIZATION ===
         st.markdown("---")
         st.subheader("🔬 Microscopic Tumor Evolution")
+        
+        # Color Legend
+        st.info("""
+        **Color Legend for Tumor Cells:**
+        - 🔵 **Cyan/Light Blue Dots** = Low Drug Resistance (Treatment Effective)
+        - 🟡 **Yellow Dots** = Moderate Resistance (Mixed Response)
+        - 🔴 **Red Dots** = High Drug Resistance (Treatment Resistant)
+        
+        Each individual dot represents one tumor cell with its own resistance profile.
+        """)
         
         # Day Navigation Controls
         nav_col1, nav_col2, nav_col3, nav_col4, nav_col5 = st.columns([1, 1, 3, 1, 1])
