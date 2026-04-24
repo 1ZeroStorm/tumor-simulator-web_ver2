@@ -31,11 +31,12 @@ def create_tumor_visualization(tumor_size, res_level, max_res=15.0):
     # Normalize resistance: 0 is blue, 1 is red
     norm_res = min(1.0, max(0.0, res_level / max_res))
     
-    # Create color array for each cell (gradient from blue to red)
+    # Create color array for each cell with enhanced contrast (gradient from bright blue to bright red)
     colors = np.zeros((num_cells, 3))
-    colors[:, 0] = norm_res              # Red channel increases with resistance
-    colors[:, 1] = 0.15                 # Green stays low
-    colors[:, 2] = 1.0 - norm_res       # Blue channel decreases with resistance
+    # Use power function for more dramatic color change
+    colors[:, 0] = norm_res ** 0.7      # Red channel increases dramatically with resistance
+    colors[:, 1] = 0.05                 # Green stays very low for purity
+    colors[:, 2] = (1.0 - norm_res) ** 0.7  # Blue channel decreases dramatically
     
     # 4. Render the tumor visualization
     fig, ax = plt.subplots(figsize=(8, 8), facecolor='#0E1117', dpi=80)
@@ -45,9 +46,9 @@ def create_tumor_visualization(tumor_size, res_level, max_res=15.0):
     ax.scatter(
         cell_coords[:, 0],
         cell_coords[:, 1],
-        s=8,  # Small dots for individual cells
+        s=12,  # Slightly larger dots for better color visibility
         c=colors,
-        alpha=0.85,
+        alpha=0.95,  # Higher opacity for better color contrast
         edgecolors='none'
     )
     
@@ -64,16 +65,13 @@ def create_tumor_visualization(tumor_size, res_level, max_res=15.0):
     
     # Add resistance status indicator
     if norm_res > 0.7:
-        status = "⚠️ HIGH RESISTANCE - AGGRESSIVE TREATMENT NEEDED"
-        color = '#FF4444'
-    elif norm_res > 0.4:
-        status = "⚡ MODERATE RESISTANCE - MONITOR CLOSELY"
-        color = '#FFA500'
+        status = "⚠️ HIGH RESISTANCE"
+        color = '#FF2222'
     else:
-        status = "✓ LOW RESISTANCE - TREATMENT EFFECTIVE"
-        color = '#4CAF50'
+        status = "✓ LOW RESISTANCE"
+        color = '#22FF22'
     
-    fig.text(0.5, 0.02, status, ha='center', fontsize=10, color=color, weight='bold')
+    fig.text(0.5, 0.02, status, ha='center', fontsize=11, color=color, weight='bold')
     
     return fig
 
