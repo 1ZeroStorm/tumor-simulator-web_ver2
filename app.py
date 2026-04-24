@@ -10,7 +10,7 @@ import os
 import time
 
 # --- HELPER FUNCTION: TUMOR VISUALIZATION ---
-def create_tumor_visualization(tumor_size, res_level_or_list, max_res=15.0):
+def create_tumor_visualization(tumor_size, res_level_or_list, max_res=15.0, jelly_intensity=0.0, jelly_phase=0):
     """
     High-performance tumor cell visualization.
     Each dot = 1 tumor cell. Color gradient based on resistance (Blue -> Red).
@@ -27,7 +27,15 @@ def create_tumor_visualization(tumor_size, res_level_or_list, max_res=15.0):
     num_cells = int(min(len(st.session_state.cell_coordinates), max(1, tumor_size)))
     
     # Use the first N cells from our persistent pool
-    cell_coords = st.session_state.cell_coordinates[:num_cells]
+    cell_coords = st.session_state.cell_coordinates[:num_cells].copy()
+
+    # Apply a jelly-like motion effect when requested
+    if jelly_intensity > 0 and num_cells > 0:
+        intensity = min(0.22, jelly_intensity)
+        phase = jelly_phase * np.pi / 4
+        offsets_x = np.sin(2 * np.pi * (cell_coords[:, 0] + phase)) * intensity * (1 - cell_coords[:, 1])
+        offsets_y = np.cos(2 * np.pi * (cell_coords[:, 1] + phase)) * intensity * (1 - cell_coords[:, 0])
+        cell_coords = np.clip(cell_coords + np.stack([offsets_x, offsets_y], axis=1), 0, 1)
     
     # 3. Determine resistance values for each cell
     if isinstance(res_level_or_list, (list, np.ndarray)):
@@ -123,6 +131,10 @@ if 'treatment_history' not in st.session_state:
     st.session_state.treatment_history = None
 if 'current_day_view' not in st.session_state:
     st.session_state.current_day_view = 0
+if 'previous_day_view' not in st.session_state:
+    st.session_state.previous_day_view = 0
+if 'animate_transition' not in st.session_state:
+    st.session_state.animate_transition = False
 if 'current_file_name' not in st.session_state:
     st.session_state.current_file_name = None
 if 'cell_resistance_data' not in st.session_state:
@@ -235,6 +247,8 @@ if uploaded_file is not None:
           </div>
         </div>
         """, unsafe_allow_html=True)
+
+        st.markdown("<div style='height: 24px;'></div>", unsafe_allow_html=True)
         
         # Day Navigation Controls
         nav_col1, nav_col2, nav_col3, nav_col4, nav_col5 = st.columns([1, 1, 3, 1, 1])
@@ -242,17 +256,21 @@ if uploaded_file is not None:
         with nav_col1:
             if st.button("◀ PREV", key="prev_day"):
                 if st.session_state.current_day_view > 0:
+                    st.session_state.previous_day_view = st.session_state.current_day_view
                     st.session_state.current_day_view -= 1
+                    st.session_state.animate_transition = True
                     st.rerun()
         
         with nav_col3:
-            st.markdown(f"<div style='text-align: center; padding: 10px;'><h3>📅 Day {st.session_state.current_day_view + 1}</h3></div>", 
+            st.markdown(f"<div style='text-align: center; padding: 10px; margin-top: 8px;'><h3>📅 Day {st.session_state.current_day_view + 1}</h3></div>", 
                        unsafe_allow_html=True)
         
         with nav_col5:
             if st.button("NEXT ▶", key="next_day"):
                 if st.session_state.current_day_view < len(history) - 1:
+                    st.session_state.previous_day_view = st.session_state.current_day_view
                     st.session_state.current_day_view += 1
+                    st.session_state.animate_transition = True
                     st.rerun()
         
         # Get current day data
@@ -262,30 +280,42 @@ if uploaded_file is not None:
         tumor_size = current_day_data["Tumor Size"]
         cell_resistance = st.session_state.cell_resistance_data or res_level
         
-        # Smooth Animation: "Bloop" effect for tumor growth/shrinkage
+        # Tumor animation: sliced jelly motion on navigation and growth
         st.markdown("---")
         animation_placeholder = st.empty()
         with animation_placeholder.container():
-            # Animate from previous day to current day
-            if current_idx > 0:
-                prev_size = history[current_idx - 1]["Tumor Size"]
+            animate_transition = st.session_state.animate_transition
+            if animate_transition:
+                prev_size = history[st.session_state.previous_day_view]["Tumor Size"]
             else:
                 prev_size = tumor_size
             
-            # Smooth transition over 5 frames
-            steps = 5
-            for frame in range(steps + 1):
-                # Linear interpolation between previous and current size
-                interpolated_size = int(prev_size + (tumor_size - prev_size) * (frame / steps))
-                
-                # Create figure for this frame
-                fig = create_tumor_visualization(interpolated_size, cell_resistance)
+            if animate_transition:
+                steps = 6
+                size_diff = tumor_size - prev_size
+                growth_factor = abs(size_diff) / max(prev_size, 1)
+                for frame in range(steps + 1):
+                    phase = frame
+                    t = frame / steps
+                    interpolated_size = int(prev_size + size_diff * t)
+                    jelly_intensity = 0.08 + min(0.4, growth_factor * 0.35)
+                    if size_diff > 0:
+                        jelly_intensity += 0.08
+                    fig = create_tumor_visualization(
+                        interpolated_size,
+                        cell_resistance,
+                        jelly_intensity=jelly_intensity,
+                        jelly_phase=phase,
+                    )
+                    animation_placeholder.pyplot(fig)
+                    plt.close(fig)
+                    if frame < steps:
+                        time.sleep(0.08)
+                st.session_state.animate_transition = False
+            else:
+                fig = create_tumor_visualization(tumor_size, cell_resistance)
                 animation_placeholder.pyplot(fig)
                 plt.close(fig)
-                
-                # Small delay between frames for smooth animation
-                if frame < steps:
-                    time.sleep(0.08)
         
         st.markdown("---")
         toggle_col1, toggle_col2 = st.columns([1, 1])
