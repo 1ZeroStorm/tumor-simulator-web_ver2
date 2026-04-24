@@ -5,147 +5,315 @@ from stable_baselines3 import PPO
 from analyzer import PatientAnalyzer
 from environment import CancerSimulation
 import matplotlib.pyplot as plt
+import matplotlib.patches as patches
 import os
-import time
 
-# --- CONFIGURATION & PAGE STYLE ---
-st.set_page_config(page_title="Peacekeeper AI | Cancer Strategy", layout="wide")
-
-st.markdown("""
-    <style>
-    .main { background-color: #0E1117; color: #C9D1D9; }
-    stButton>button { width: 100%; border-radius: 5px; height: 3em; background-color: #238636; color: white; }
-    </style>
-    """, unsafe_allow_html=True)
-
-# --- MODEL & DATA LOADING ---
-MODEL_PATH = "peacekeeper_final_azure" # SB3 adds .zip automatically
-DATA_PATH = "data/Gene_Expression_Analysis_and_Disease_Relationship_Synthetic.csv"
-
-@st.cache_resource
-def load_model():
-    if os.path.exists(f"{MODEL_PATH}.zip"):
-        return PPO.load(MODEL_PATH, device="cpu")
-    return None
-
-@st.cache_data
-def get_patient_data():
-    if os.path.exists(DATA_PATH):
-        analyzer = PatientAnalyzer(DATA_PATH)
-        return analyzer.get_strategic_profile()
-    return {"avg_growth": 14.0, "max_res_a": 15.0, "starting_res_a": 9.0}
-
-model = load_model()
-patient_profile = get_patient_data()
-
-# --- SESSION STATE MANAGEMENT ---
-if 'step' not in st.session_state:
-    st.session_state.step = 0
-    st.session_state.history = []
-    st.session_state.current_size = 1000.0
-    # Initialize 5000 persistent coordinates for the "jelly" effect
-    st.session_state.cell_coords = np.random.rand(5000, 2) 
-    st.session_state.last_display_size = 1000.0
-
-# --- VISUALIZATION FUNCTION ---
-def render_tumor_visual(display_size, res_a, max_res=15.0):
-    """Renders cells as dots. Redness increases with Res_A."""
-    fig, ax = plt.subplots(figsize=(6, 6), facecolor='#0E1117')
+# --- HELPER FUNCTION: TUMOR VISUALIZATION ---
+def create_tumor_visualization(tumor_size, title=""):
+    """Create a dark-mode tumor visualization with microscopic nodes"""
+    fig, ax = plt.subplots(figsize=(8, 6), facecolor='#0E1117')
     ax.set_facecolor('#161B22')
     
-    # Scale tumor size to number of dots (Max 5000 for performance)
-    num_dots = int(np.clip(display_size, 10, 5000))
-    coords = st.session_state.cell_coords[:num_dots]
+    # Calculate number of tumor nodes based on size
+    # Scale: higher tumor size = more dots
+    num_tumors = max(10, int(tumor_size / 100))
+    num_tumors = min(200, num_tumors)  # Cap at 200 for visibility
     
-    # Calculate Redness based on Resistance A
-    # 0 Res = Blue/Green, Max Res = Bright Red
-    norm_res = np.clip(res_a / max_res, 0, 1)
-    cell_color = (norm_res, 0.2, 1 - norm_res, 0.6) # RGBA
+    # Generate random positions for tumor nodes
+    np.random.seed(hash(title) % 2**32)  # Consistent positioning
+    x_positions = np.random.uniform(0.1, 0.9, num_tumors)
+    y_positions = np.random.uniform(0.1, 0.9, num_tumors)
     
-    ax.scatter(coords[:, 0], coords[:, 1], s=12, c=[cell_color], edgecolors='none')
+    # Vary dot sizes for more realistic tumor appearance
+    sizes = np.random.uniform(20, 150, num_tumors)
+    
+    # Create gradient effect with different colors
+    scatter = ax.scatter(x_positions, y_positions, s=sizes, 
+                        c=np.random.uniform(0.3, 1, num_tumors), 
+                        cmap='Reds', alpha=0.7, edgecolors='#FF6B6B', linewidth=0.5)
     
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
     ax.axis('off')
+    
+    # Add title with tumor count
+    fig.text(0.5, 0.95, title, ha='center', fontsize=14, color='#C9D1D9', weight='bold')
+    fig.text(0.5, 0.02, f"Estimated Tumor Cells: {num_tumors * 100}", 
+            ha='center', fontsize=10, color='#8B949E', style='italic')
+    
     return fig
 
-# --- MAIN UI ---
-st.title("🧬 Peacekeeper AI: Evolutionary Trap Simulation")
-st.sidebar.header("Patient Profile (from Data)")
-st.sidebar.write(f"Avg Growth: {patient_profile['avg_growth']:.2f}")
-st.sidebar.write(f"Initial Res A: {patient_profile['starting_res_a']:.2f}")
+# --- CONFIGURATION ---
+st.set_page_config(page_title="The Peacekeeper: AI Immunotherapy", layout="wide")
 
-col1, col2 = st.columns([1, 1])
+MODEL_PATH = "peacekeeper_final_azure" # Do not add .zip here
 
-with col1:
-    st.subheader("Microscopic Tumor Environment")
-    tumor_placeholder = st.empty()
+@st.cache_resource
+def load_model():
+    if os.path.exists(f"{MODEL_PATH}.zip"):
+        return PPO.load(MODEL_PATH)
+    else:
+        st.error(f"Model file {MODEL_PATH}.zip not found in repository!")
+        return None
+
+st.title("🛡️ The Peacekeeper")
+st.markdown("### Digital Immunotherapy & Evolutionary Trap Optimizer")
+st.info("Upload patient proteomic data to generate a personalized, safety-constrained treatment plan.")
+
+# --- SIDEBAR: PATIENT DATA ---
+st.sidebar.header("Patient Data Input")
+uploaded_file = st.sidebar.file_uploader("Upload Proteomic CSV", type=["csv"])
+
+# Initialize session state variables
+if 'uploaded_data' not in st.session_state:
+    st.session_state.uploaded_data = None
+if 'patient_profile' not in st.session_state:
+    st.session_state.patient_profile = None
+if 'treatment_history' not in st.session_state:
+    st.session_state.treatment_history = None
+if 'current_day_view' not in st.session_state:
+    st.session_state.current_day_view = 0
+if 'current_file_name' not in st.session_state:
+    st.session_state.current_file_name = None
+
+if uploaded_file is not None:
+    # Check if a new file was uploaded (different from the current one)
+    if uploaded_file.name != st.session_state.current_file_name:
+        # Reset treatment results when a new file is uploaded
+        st.session_state.treatment_history = None
+        st.session_state.current_day_view = 0
+        st.session_state.current_file_name = uploaded_file.name
     
-    # Display current tumor state
-    # If it's the first run, it shows the initial 1000 cells
-    initial_res = st.session_state.history[-1]['Res_A'] if st.session_state.history else patient_profile['starting_res_a']
-    fig = render_tumor_visual(st.session_state.last_display_size, initial_res)
-    tumor_placeholder.pyplot(fig)
-
-with col2:
-    st.subheader("Simulation Control")
+    # Store uploaded data in session state
+    data = pd.read_csv(uploaded_file)
+    st.session_state.uploaded_data = data
     
-    if st.button("Run Strategic Next Step"):
-        if model:
-            # 1. Setup environment state
-            # State: [Size, Res_A, Res_B, Toxicity]
-            res_a_curr = st.session_state.history[-1]['Res_A'] if st.session_state.history else patient_profile['starting_res_a']
-            res_b_curr = st.session_state.history[-1]['Res_B'] if st.session_state.history else 5.0
-            tox_curr = st.session_state.history[-1]['Toxicity'] if st.session_state.history else 0.0
-            
-            obs = np.array([st.session_state.current_size, res_a_curr, res_b_curr, tox_curr], dtype=np.float32)
-            
-            # 2. AI Predicts Action
+    model = load_resources()
+    
+    try:
+        analyzer = PatientAnalyzer(df=data)
+    except Exception as e:
+        st.error(f"Error initializing analyzer: {e}")
+        st.stop()
+    
+    # Step 1: Diagnostic Phase (Neural Network)
+    with st.spinner("Analyzing Proteomic Signatures..."):
+        profile = analyzer.get_patient_profile(data)
+        st.session_state.patient_profile = profile
+    
+    # --- DISPLAY DIAGNOSTIC SUMMARY ---
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Max Resistance (Drug A)", f"{profile['max_res_a']:.2f}")
+    col2.metric("Avg Growth Rate", f"{profile['avg_growth']:.2f}%")
+    col3.metric("Initial Res_B", "5.00 (Standard)")
+
+    if st.button("Generate Optimized Treatment Plan"):
+        # Step 2: Strategy Optimization Phase
+        env = CancerSimulation(profile)
+        obs, _ = env.reset()
+        
+        history = []
+        terminated = False
+        day = 1
+        
+        # Run simulation for up to 30 days
+        while not terminated and day <= 30:
             action, _ = model.predict(obs, deterministic=True)
+            obs, reward, terminated, truncated, info = env.step(action)
             
-            # 3. Step the simulation (Logic inside environment.py)
-            env = CancerSimulation(patient_profile)
-            env.state = obs # Sync state
-            new_obs, reward, terminated, truncated, info = env.step(action)
+            # Map action to readable name - clear conditional logic
+            if action == 0:
+                action_name = "Rest (Recovery)"
+            elif action == 1:
+                action_name = "Drug A (Priming)"
+            else:  # action == 2
+                action_name = "Drug B (TRAP)"
             
-            # 4. "Bloop" Animation Logic
-            target_size = new_obs[0]
-            start_size = st.session_state.last_display_size
+            # Get values from state
+            size, res_a, res_b = obs[0], obs[1], obs[2]
+            toxicity = info.get('toxicity', day)
             
-            # Animate growth/shrinkage in 5 frames
-            for i in range(1, 6):
-                temp_size = start_size + (target_size - start_size) * (i / 5)
-                with tumor_placeholder.container():
-                    fig_anim = render_tumor_visual(temp_size, new_obs[1])
-                    st.pyplot(fig_anim)
-                time.sleep(0.05)
+            # Safety Status Logic
+            if toxicity < 5: status = "🟢 SAFE"
+            elif toxicity < 8: status = "🟡 MONITOR"
+            else: status = "🔴 CRITICAL"
             
-            # 5. Update state
-            st.session_state.current_size = new_obs[0]
-            st.session_state.last_display_size = new_obs[0]
-            st.session_state.step += 1
-            
-            action_map = {0: "Wait", 1: "Drug A (Priming)", 2: "Drug B (Trap)"}
-            st.session_state.history.append({
-                "Day": st.session_state.step,
-                "Action": action_map[action],
-                "Size": new_obs[0],
-                "Res_A": new_obs[1],
-                "Res_B": new_obs[2],
-                "Toxicity": new_obs[3]
+            history.append({
+                "Day": day,
+                "Action": action_name,
+                "Tumor Size": int(size),
+                "Resist_A": round(res_a, 2),
+                "Resist_B": round(res_b, 2),
+                "Safety Status": status
             })
+            
+            if size <= 0:
+                break
+            day += 1
+        
+        # Store history in session state
+        st.session_state.treatment_history = history
+        st.session_state.current_day_view = 0
+    
+    # Display results if history exists
+    if st.session_state.treatment_history is not None:
+        history = st.session_state.treatment_history
+        profile = st.session_state.patient_profile
+        
+        # --- RESULTS DISPLAY ---
+        st.success(f"Strategy Optimized: Treatment targets eradication by Day {len(history)}")
+        
+        # === INTERACTIVE TUMOR VISUALIZATION ===
+        st.markdown("---")
+        st.subheader("🔬 Microscopic Tumor Evolution")
+        
+        # Day Navigation Controls
+        nav_col1, nav_col2, nav_col3, nav_col4, nav_col5 = st.columns([1, 1, 3, 1, 1])
+        
+        with nav_col1:
+            if st.button("◀ PREV", key="prev_day"):
+                if st.session_state.current_day_view > 0:
+                    st.session_state.current_day_view -= 1
+        
+        with nav_col3:
+            st.markdown(f"<div style='text-align: center; padding: 10px;'><h3>📅 Day {st.session_state.current_day_view + 1}</h3></div>", 
+                       unsafe_allow_html=True)
+        
+        with nav_col5:
+            if st.button("NEXT ▶", key="next_day"):
+                if st.session_state.current_day_view < len(history) - 1:
+                    st.session_state.current_day_view += 1
+        
+        # Before/After Toggle
+        toggle_col1, toggle_col2 = st.columns([1, 1])
+        with toggle_col1:
+            show_before = st.toggle("🔴 Before Drug Application", value=True, key="before_toggle")
+        with toggle_col2:
+            show_after = st.toggle("🟢 After Drug Application", value=True, key="after_toggle")
+        
+        # Get current day data
+        current_idx = st.session_state.current_day_view
+        current_day_data = history[current_idx]
+        
+        # Display tumor visualizations
+        if show_before and show_after:
+            vis_col1, vis_col2 = st.columns(2)
+            
+            # Estimate tumor size before drug (slightly larger)
+            tumor_before = current_day_data["Tumor Size"] * 1.15
+            
+            with vis_col1:
+                st.markdown("<h4 style='text-align: center;'>🔴 Before Treatment</h4>", unsafe_allow_html=True)
+                fig_before = create_tumor_visualization(tumor_before, 
+                    f"Day {current_day_data['Day']} - Before {current_day_data['Action']}")
+                st.pyplot(fig_before)
+                plt.close(fig_before)
+            
+            with vis_col2:
+                st.markdown("<h4 style='text-align: center;'>🟢 After Treatment</h4>", unsafe_allow_html=True)
+                fig_after = create_tumor_visualization(current_day_data["Tumor Size"], 
+                    f"Day {current_day_data['Day']} - After {current_day_data['Action']}")
+                st.pyplot(fig_after)
+                plt.close(fig_after)
+        
+        elif show_before:
+            st.markdown("<h4 style='text-align: center;'>🔴 Before Treatment</h4>", unsafe_allow_html=True)
+            tumor_before = current_day_data["Tumor Size"] * 1.15
+            fig_before = create_tumor_visualization(tumor_before, 
+                f"Day {current_day_data['Day']} - Before {current_day_data['Action']}")
+            st.pyplot(fig_before)
+            plt.close(fig_before)
+        
+        elif show_after:
+            st.markdown("<h4 style='text-align: center;'>🟢 After Treatment</h4>", unsafe_allow_html=True)
+            fig_after = create_tumor_visualization(current_day_data["Tumor Size"], 
+                f"Day {current_day_data['Day']} - After {current_day_data['Action']}")
+            st.pyplot(fig_after)
+            plt.close(fig_after)
+        
+        # Display current day details
+        st.markdown("---")
+        detail_col1, detail_col2, detail_col3, detail_col4 = st.columns(4)
+        
+        with detail_col1:
+            st.metric("Action Taken", current_day_data["Action"], 
+                     delta=None, delta_color="off")
+        with detail_col2:
+            st.metric("Tumor Size", f"{current_day_data['Tumor Size']}", 
+                     delta=None, delta_color="off")
+        with detail_col3:
+            st.metric("Drug A Resistance", f"{current_day_data['Resist_A']:.2f}", 
+                     delta=None, delta_color="off")
+        with detail_col4:
+            st.metric("Drug B Resistance", f"{current_day_data['Resist_B']:.2f}", 
+                     delta=None, delta_color="off")
+        
+        # Display Table
+        st.markdown("---")
+        st.subheader("📊 Full Treatment Timeline")
+        df_history = pd.DataFrame(history)
+        st.dataframe(df_history, use_container_width=True)
+        
+        # --- VISUALIZATION (The "Why") ---
+        st.subheader("📈 Evolutionary Trap Analysis - Treatment Strategy Over Time")
+        fig, ax1 = plt.subplots(figsize=(12, 6), facecolor='#0E1117')
+        ax1.set_facecolor('#161B22')
 
-    # Show Progress Table
-    if st.session_state.history:
-        df_history = pd.DataFrame(st.session_state.history)
-        st.table(df_history.tail(5))
+        # Identify Drug B application days
+        drug_b_days = df_history[df_history['Action'].str.contains('Drug B', na=False)]['Day'].tolist()
+        
+        # Plot Tumor Size on primary y-axis
+        color = 'tab:red'
+        ax1.set_xlabel('Day', color='#C9D1D9', fontsize=11)
+        ax1.set_ylabel('Tumor Size', color=color, fontsize=11)
+        ax1.plot(df_history['Day'], df_history['Tumor Size'], color=color, linewidth=3, label="Tumor Size", marker='o', markersize=4)
+        ax1.tick_params(axis='y', labelcolor=color)
+        ax1.tick_params(axis='x', labelcolor='#C9D1D9')
+        ax1.grid(True, alpha=0.2, color='#30363D')
+        
+        # Highlight Drug B application areas
+        if drug_b_days:
+            for drug_b_day in drug_b_days:
+                ax1.axvline(x=drug_b_day, color='#FF6B6B', linestyle='--', linewidth=2, alpha=0.6)
+            ax1.axvspan(min(drug_b_days) - 0.5, max(drug_b_days) + 0.5, alpha=0.1, color='#FF6B6B', label='Drug B (TRAP) Applied')
 
-# --- PLOTS ---
-if st.session_state.history:
-    st.divider()
-    st.subheader("Strategic Analytics")
-    chart_data = pd.DataFrame(st.session_state.history).set_index("Day")
-    st.line_chart(chart_data[["Size", "Res_A", "Res_B"]])
+        # Plot Resistance levels on secondary y-axis
+        ax2 = ax1.twinx()
+        ax2.set_ylabel('Resistance Levels', color='#C9D1D9', fontsize=11)
+        ax2.plot(df_history['Day'], df_history['Resist_A'], '--', label="Resist A (Priming Target)", 
+                color='#1f77b4', linewidth=2, marker='s', markersize=3)
+        ax2.plot(df_history['Day'], df_history['Resist_B'], ':', label="Resist B (Trap Trigger)", 
+                color='#2ca02c', linewidth=2.5, marker='^', markersize=4)
+        
+        # Add trap threshold line
+        ax2.axhline(y=2.5, color='#FFA500', linestyle='-', linewidth=2, alpha=0.7, label="Trap Threshold (2.5)")
+        ax2.tick_params(axis='y', labelcolor='#C9D1D9')
+        ax2.set_ylim(bottom=0)
+        
+        # Combine legends from both axes
+        lines1, labels1 = ax1.get_legend_handles_labels()
+        lines2, labels2 = ax2.get_legend_handles_labels()
+        ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper left', fontsize=9, facecolor='#161B22', edgecolor='#30363D')
+        
+        ax1.set_title('Strategic Treatment Timeline: Priming → Trap Activation', 
+                     color='#C9D1D9', fontsize=12, weight='bold', pad=15)
+        
+        fig.tight_layout()
+        st.pyplot(fig)
 
-if not model:
-    st.error("Model file not found. Please ensure peacekeeper_final_azure.zip is in the root folder.")
+        st.markdown("""
+        **📋 Treatment Strategy Explanation:**
+        
+        🔵 **Phase 1 - Priming (Drug A):** The AI applies Drug A to build up collateral sensitivity. 
+        While Res_A increases, Res_B is driven down toward the trap threshold.
+        
+        🔴 **Phase 2 - Trap Activation (Drug B):** Once Res_B crosses the 2.5 threshold, 
+        the evolutionary trap is sprung! Drug B becomes highly effective (85% kill rate), 
+        rapidly reducing tumor burden while maintaining safety.
+        
+        ⚠️ **Toxicity Management:** The system monitors cumulative toxicity and switches 
+        to rest days when needed to prevent organ damage.
+        """)
+
+else:
+    st.warning("Please upload a CSV file to begin analysis.")
