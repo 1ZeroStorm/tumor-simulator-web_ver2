@@ -81,7 +81,7 @@ def load_model():
     if os.path.exists(f"{MODEL_PATH}.zip"):
         return PPO.load(MODEL_PATH)
     else:
-        st.error(f"Model file {MODEL_PATH}.zip not found!")
+        # Graceful fallback if model is missing
         return None
 
 st.title("🛡️ OncoSteer")
@@ -93,15 +93,18 @@ st.sidebar.header("Patient Data Input")
 data_mode = st.sidebar.radio("Select Data Source:", ["Upload CSV", "Use Default Synthetic Data"])
 
 uploaded_file = None
+current_data_source = None
+
 if data_mode == "Upload CSV":
     uploaded_file = st.sidebar.file_uploader("Upload Proteomic CSV", type=["csv"])
-    current_data_source = uploaded_file.name if uploaded_file else None
+    if uploaded_file:
+        current_data_source = uploaded_file.name
 else:
     if os.path.exists(DEFAULT_DATA_PATH):
         uploaded_file = DEFAULT_DATA_PATH
         current_data_source = "default_synthetic_data"
     else:
-        st.sidebar.error("Default data file not found at path.")
+        st.sidebar.error(f"Default data file not found at {DEFAULT_DATA_PATH}")
 
 # Initialize session state
 if 'treatment_history' not in st.session_state:
@@ -140,37 +143,42 @@ if uploaded_file is not None:
     col3.metric("Initial Res_B", "5.00 (Standard)")
 
     if st.button("Generate Optimized Treatment Plan"):
-        env = CancerSimulation(profile)
-        obs, _ = env.reset()
-        history = []
-        day = 1
-        
-        while day <= 30:
-            # Current size before treatment
-            size_before = int(obs[0])
+        if model is None:
+            st.error("Model not found. Please ensure the model file is in the correct directory.")
+        else:
+            env = CancerSimulation(profile)
+            obs, _ = env.reset()
+            history = []
+            day = 1
             
-            action, _ = model.predict(obs, deterministic=True)
-            obs, reward, terminated, truncated, info = env.step(action)
+            while day <= 30:
+                size_before = int(obs[0])
+                
+                # Predict action
+                action, _ = model.predict(obs, deterministic=True)
+                
+                # FIX: Ensure action is a standard Python integer
+                action_int = int(action.item())
+                
+                obs, reward, terminated, truncated, info = env.step(action_int)
+                size_after = int(obs[0])
+                
+                action_names = {0: "Rest (Recovery)", 1: "Drug A (Priming)", 2: "Drug B (TRAP)"}
+                
+                history.append({
+                    "Day": day,
+                    "Action": action_names.get(action_int, "Unknown"),
+                    "Size Before": size_before,
+                    "Size After": size_after,
+                    "Resist_A": round(float(obs[1]), 2),
+                    "Resist_B": round(float(obs[2]), 2),
+                })
+                
+                if size_after <= 0 or terminated: 
+                    break
+                day += 1
             
-            # Size after treatment
-            size_after = int(obs[0])
-            
-            action_names = {0: "Rest (Recovery)", 1: "Drug A (Priming)", 2: "Drug B (TRAP)"}
-            
-            history.append({
-                "Day": day,
-                "Action": action_names[action],
-                "Size Before": size_before,
-                "Size After": size_after,
-                "Tumor Size": size_after, # For backward compatibility
-                "Resist_A": round(obs[1], 2),
-                "Resist_B": round(obs[2], 2),
-            })
-            
-            if size_after <= 0 or terminated: break
-            day += 1
-        
-        st.session_state.treatment_history = history
+            st.session_state.treatment_history = history
 
     # --- RESULTS DISPLAY ---
     if st.session_state.treatment_history:
@@ -198,12 +206,12 @@ if uploaded_file is not None:
         vis_col1, vis_col2 = st.columns(2)
         with vis_col1:
             st.markdown("<h4 style='text-align: center;'>🔴 Before Treatment</h4>", unsafe_allow_html=True)
-            st.plotly_chart(create_tumor_visualization(curr["Size Before"], st.session_state.cell_resistance_data), use_container_width=True, key="before")
+            st.plotly_chart(create_tumor_visualization(curr["Size Before"], st.session_state.cell_resistance_data), use_container_width=True, key=f"before_{st.session_state.current_day_view}")
         with vis_col2:
             st.markdown("<h4 style='text-align: center;'>🟢 After Treatment</h4>", unsafe_allow_html=True)
-            st.plotly_chart(create_tumor_visualization(curr["Size After"], st.session_state.cell_resistance_data), use_container_width=True, key="after")
+            st.plotly_chart(create_tumor_visualization(curr["Size After"], st.session_state.cell_resistance_data), use_container_width=True, key=f"after_{st.session_state.current_day_view}")
 
-        # --- UPDATED CHART: BEFORE VS AFTER ---
+        # --- CHART: BEFORE VS AFTER ---
         st.markdown("---")
         st.subheader("📈 Evolutionary Impact Analysis")
         
