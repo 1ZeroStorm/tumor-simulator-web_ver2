@@ -47,12 +47,10 @@ def create_tumor_visualization(tumor_size, res_level_or_list, max_res=15.0):
     # 4. Create color gradient based on individual cell resistance levels
     norm_resistances = np.clip(cell_resistances / max_res, 0, 1)
     
-    # Create lighter color gradient: Cyan (low resistance) -> Yellow -> Red (high resistance)
-    colors = np.zeros((num_cells, 3))
-    # Cyan to Red gradient with brighter colors
-    colors[:, 0] = norm_resistances ** 0.8      # Red: increases from 0 to 1
-    colors[:, 1] = (1.0 - norm_resistances) ** 0.6  # Green: high for low-mid resistance (cyan/yellow)
-    colors[:, 2] = (1.0 - norm_resistances) ** 0.5  # Blue: high for low resistance (cyan), low for high (red)
+    # Use matplotlib colormap for smooth gradient: Green (low) -> Yellow -> Orange -> Red (high)
+    # This creates a linear palette that works on any background
+    cmap = plt.cm.get_cmap('YlOrRd')
+    colors = cmap(norm_resistances)[:, :3]  # Get RGB values, drop alpha
     
     # 5. Render the tumor visualization
     fig, ax = plt.subplots(figsize=(8, 8), facecolor='#0E1117', dpi=80)
@@ -98,15 +96,6 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
-
-# Force dark theme
-st.markdown("""
-<style>
-    .stApp {
-        background-color: #000000;
-    }
-</style>
-""", unsafe_allow_html=True)
 
 MODEL_PATH = "peacekeeper_final_azure" # Do not add .zip here
 
@@ -235,12 +224,14 @@ if uploaded_file is not None:
         
         # Color Legend
         st.info("""
-        **Color Legend for Tumor Cells:**
-        - 🔵 **Cyan/Light Blue Dots** = Low Drug Resistance (Treatment Effective)
-        - 🟡 **Yellow Dots** = Moderate Resistance (Mixed Response)
-        - 🔴 **Red Dots** = High Drug Resistance (Treatment Resistant)
+        **Resistance Level Gradient:**
         
-        Each individual dot represents one tumor cell with its own resistance profile.
+        🟨 Yellow → 🟧 Orange → 🔴 Red
+        
+        **Left (Yellow)** = Low Resistance → **Right (Red)** = High Resistance
+        
+        Each individual dot's color represents its drug resistance level on a continuous scale.
+        The gradient helps visualize tumor heterogeneity and treatment susceptibility.
         """)
         
         # Day Navigation Controls
