@@ -9,33 +9,50 @@ import plotly.graph_objects as go
 import os
 
 # --- HELPER FUNCTION: TUMOR VISUALIZATION ---
-def create_tumor_visualization(tumor_size, resistance_list, max_res=15.0):
+def create_tumor_visualization(tumor_size, resistance_list, max_res=15.0): 
+    # tumor size = 1000
+    # resistance list: a list containing resistance level or all cells (ex: 2000 since we disinclude healthy tumors)
+
     """
     High-performance tumor cell visualization.
     Maps individual resistance values to colors for every single cell.
     """
     if 'cell_coordinates' not in st.session_state:
+
         # Persistent coordinate pool to keep cell positions stable during refresh
+        # 20000 rows and 2 cols (represents coords interval 0 to 1) 
         st.session_state.cell_coordinates = np.random.rand(20000, 2)
 
-    num_cells = int(min(len(st.session_state.cell_coordinates), max(1, tumor_size)))
+    num_cells = int(min(len(st.session_state.cell_coordinates), max(1, tumor_size))) # setting the num_cell to match the tumor_size
     cell_coords = st.session_state.cell_coordinates[:num_cells].copy()
+    # [:num_cells] -> start at index 0 stop at index num_cells
 
     # 1. Handle Resistance Data
     # If we have a list of individual resistances, we slice it to match current population
-    if isinstance(resistance_list, (list, np.ndarray)) and len(resistance_list) > 0:
+    if isinstance(resistance_list, (list, np.ndarray)) and len(resistance_list) > 0: 
+        # enter this block if the resistance list is an np array or list and not empty
         # We cycle or pad the list if the current tumor size exceeds our data sample
-        if len(resistance_list) < num_cells:
-            repeats = (num_cells // len(resistance_list)) + 1
+        
+        if len(resistance_list) < num_cells: 
+            # if resistance_list for example (300) and num_cells: 1000
+
+            repeats = (num_cells // len(resistance_list)) + 1 # 3+1 = 4
             current_resistances = np.tile(resistance_list, repeats)[:num_cells]
+            # extenting the resistance 4 times, taking num_cells elements from 0  drom that list
         else:
             current_resistances = np.array(resistance_list[:num_cells])
+            # just taking the resistance list, stopped in index num_cells
+
     else:
-        # Fallback if no list is provided
-        current_resistances = np.full(num_cells, 5.0)
+        # Fallback if resistance_list is not a list or is empty
+        
+        current_resistances = np.full(num_cells, 5.0) # create a 1D array [5,5,5,5,...num_cells times]
 
     # 2. Normalize for colorscale (0 to 1)
     norm_colors = np.clip(current_resistances / max_res, 0, 1)
+    # current resistances 0 < x < max_res, 
+    # if current_resistances / max_res surpass [0, 1] close interval, then it will be clipped 0 or 1
+
 
     fig = go.Figure(
         data=[
