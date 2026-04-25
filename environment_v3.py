@@ -38,7 +38,8 @@ class CancerSimulation(gym.Env):
         
         # 1. Natural Tumor Growth
         size = size_before * (1.0 + self.profile['avg_growth'] / 100.0) # if avg_growth is 14, it means the tumor grows by 14% each day.
-        
+        size_after_duplication = size
+
         # 2. Toxicity Logic (Keep your existing constraints) - either drug A or B, it adds toxicity and consecutive drug counter
         if action == 1 or action == 2:
             self.consecutive_drugs += 1
@@ -90,5 +91,8 @@ class CancerSimulation(gym.Env):
             reward += 2000 # Massive jackpot for curing the cancer
         elif self.day >= 60:
             reward -= 500 # Penalty for failing to cure in time
+        
+        
+        info = {'size_after_duplication': size_after_duplication}
             
-        return self.state, reward, done, False, {}
+        return self.state, reward, done, False, info
